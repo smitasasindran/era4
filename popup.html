@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>YouTube Notes & Screenshots</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="popup-header">
+      <h1>📹 YouTube Notes</h1>
+      <div class="header-actions">
+        <button id="clearAllBtn" class="clear-btn">Clear All</button>
+        <button id="exportBtn" class="export-btn">Export</button>
+      </div>
+    </header>
+    
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="screenshots">📸 Screenshots</button>
+      <button class="tab-btn" data-tab="bookmarks">🔖 Bookmarks</button>
+    </div>
+    
+    <div class="tab-content">
+      <div id="screenshots" class="tab-pane active">
+        <div class="items-container" id="screenshotsContainer">
+          <div class="empty-state">No screenshots yet</div>
+        </div>
+      </div>
+      
+      <div id="bookmarks" class="tab-pane">
+        <div class="items-container" id="bookmarksContainer">
+          <div class="empty-state">No bookmarks yet</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="shortcuts-info">
+      <h3>Keyboard Shortcuts:</h3>
+      <div class="shortcut-item">
+        <span class="key">Ctrl+Shift+S</span>
+        <span class="description">Take Screenshot</span>
+      </div>
+      <div class="shortcut-item">
+        <span class="key">Ctrl+Shift+B</span>
+        <span class="description">Bookmark Timestamp</span>
+      </div>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
