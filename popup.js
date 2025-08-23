@@ -33,6 +33,14 @@ document.addEventListener('DOMContentLoaded', function() {
   // Event listeners for buttons
   document.getElementById('clearAllBtn').addEventListener('click', clearAllData);
   document.getElementById('exportBtn').addEventListener('click', exportData);
+  
+  // Transcript upload event listeners
+  document.getElementById('uploadTranscriptBtn').addEventListener('click', () => {
+    document.getElementById('transcriptFileInput').click();
+  });
+  
+  document.getElementById('transcriptFileInput').addEventListener('change', handleFileSelection);
+  document.getElementById('processTranscriptBtn').addEventListener('click', processTranscriptFile);
 });
 
 // Load and display screenshots
@@ -381,6 +389,256 @@ function jumpToTimestamp(timestamp, videoId) {
 
 // Helper function to convert timestamp string to seconds
 function parseTimeToSeconds(timeString) {
+  const parts = timeString.split(':').map(Number);
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1];
+  } else if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+  return 0;
+}
+
+// Handle file selection
+function handleFileSelection(event) {
+  const file = event.target.files[0];
+  if (file) {
+    const fileName = file.name;
+    document.getElementById('selectedFileName').textContent = `Selected: ${fileName}`;
+    document.getElementById('processTranscriptBtn').style.display = 'inline-block';
+    
+    // Store the file for processing
+    window.selectedTranscriptFile = file;
+  }
+}
+
+// Process the selected transcript file
+function processTranscriptFile() {
+  const file = window.selectedTranscriptFile;
+  if (!file) {
+    alert('No file selected');
+    return;
+  }
+  
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const content = e.target.result;
+      const parsedTranscript = parseTranscriptContent(content, file.name);
+      
+      if (parsedTranscript.length > 0) {
+        // Get current video info from active tab
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          const activeTab = tabs[0];
+          if (activeTab.url && activeTab.url.includes('youtube.com/watch')) {
+            const videoId = new URL(activeTab.url).searchParams.get('v');
+            if (videoId) {
+              // Save transcript to storage
+              chrome.storage.local.set({ 
+                [`transcript_${videoId}`]: {
+                  data: parsedTranscript,
+                  filename: file.name,
+                  date: new Date().toISOString()
+                }
+              }, () => {
+                // Send message to content script to update transcript data
+                chrome.tabs.sendMessage(activeTab.id, {
+                  action: "updateTranscriptData",
+                  transcriptData: parsedTranscript
+                });
+                
+                // Refresh the transcripts tab
+                loadTranscripts();
+                
+                // Reset UI
+                document.getElementById('selectedFileName').textContent = '';
+                document.getElementById('processTranscriptBtn').style.display = 'none';
+                document.getElementById('transcriptFileInput').value = '';
+                window.selectedTranscriptFile = null;
+                
+                alert(`Successfully uploaded transcript with ${parsedTranscript.length} segments!`);
+              });
+            } else {
+              alert('Could not determine video ID. Please make sure you are on a YouTube video page.');
+            }
+          } else {
+            alert('Please navigate to a YouTube video page to upload a transcript.');
+          }
+        });
+      } else {
+        alert('No valid transcript data found in the file.');
+      }
+    } catch (error) {
+      console.error('Error processing transcript:', error);
+      alert('Error processing transcript file: ' + error.message);
+    }
+  };
+  
+  reader.readAsText(file);
+}
+
+// Parse transcript content based on file type
+function parseTranscriptContent(content, filename) {
+  try {
+    let parsedTranscript = [];
+    
+    // Try to detect file format and parse accordingly
+    if (filename.endsWith('.srt')) {
+      parsedTranscript = parseSRTFile(content);
+    } else if (filename.endsWith('.vtt')) {
+      parsedTranscript = parseVTTFile(content);
+    } else if (filename.endsWith('.json')) {
+      parsedTranscript = parseJSONTranscript(content);
+    } else {
+      // Assume it's a plain text file with timestamps
+      parsedTranscript = parsePlainTextTranscript(content);
+    }
+    
+    return parsedTranscript;
+  } catch (error) {
+    console.error('Error parsing transcript:', error);
+    return [];
+  }
+}
+
+// Parse SRT subtitle file
+function parseSRTFile(content) {
+  const segments = [];
+  const blocks = content.split('\n\n').filter(block => block.trim());
+  
+  for (const block of blocks) {
+    const lines = block.split('\n').filter(line => line.trim());
+    if (lines.length >= 3) {
+      const timeLine = lines[1];
+      const text = lines.slice(2).join(' ').trim();
+      
+      // Parse SRT timestamp format (00:00:00,000 --> 00:00:00,000)
+      const timeMatch = timeLine.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})/);
+      if (timeMatch) {
+        const hours = parseInt(timeMatch[1]);
+        const minutes = parseInt(timeMatch[2]);
+        const seconds = parseInt(timeMatch[3]);
+        const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+        const timestamp = formatTime(totalSeconds);
+        
+        segments.push({
+          timestamp: timestamp,
+          text: text,
+          seconds: totalSeconds
+        });
+      }
+    }
+  }
+  
+  return segments;
+}
+
+// Parse VTT subtitle file
+function parseVTTFile(content) {
+  const segments = [];
+  const lines = content.split('\n');
+  let currentTime = '';
+  let currentText = '';
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    
+    // Skip header lines
+    if (line === 'WEBVTT' || line === '' || line.includes('-->')) {
+      continue;
+    }
+    
+    // Check if line contains timestamp
+    const timeMatch = line.match(/(\d{2}):(\d{2}):(\d{2})\.(\d{3})/);
+    if (timeMatch) {
+      // Save previous segment if exists
+      if (currentTime && currentText) {
+        const totalSeconds = parseTime(currentTime);
+        segments.push({
+          timestamp: currentTime,
+          text: currentText.trim(),
+          seconds: totalSeconds
+        });
+      }
+      
+      currentTime = timeMatch[0];
+      currentText = '';
+    } else if (line && currentTime) {
+      currentText += line + ' ';
+    }
+  }
+  
+  // Add last segment
+  if (currentTime && currentText) {
+    const totalSeconds = parseTime(currentTime);
+    segments.push({
+      timestamp: currentTime,
+      text: currentText.trim(),
+      seconds: totalSeconds
+    });
+  }
+  
+  return segments;
+}
+
+// Parse JSON transcript file
+function parseJSONTranscript(content) {
+  try {
+    const data = JSON.parse(content);
+    if (Array.isArray(data)) {
+      return data.map(item => ({
+        timestamp: item.timestamp || item.time || formatTime(item.seconds || 0),
+        text: item.text || item.content || '',
+        seconds: item.seconds || parseTime(item.timestamp || item.time || '0:00')
+      }));
+    } else if (data.segments || data.transcript) {
+      const segments = data.segments || data.transcript;
+      return segments.map(item => ({
+        timestamp: item.timestamp || item.time || formatTime(item.seconds || 0),
+        text: item.text || item.content || '',
+        seconds: item.seconds || parseTime(item.timestamp || item.time || '0:00')
+      }));
+    }
+  } catch (error) {
+    console.error('Error parsing JSON:', error);
+  }
+  return [];
+}
+
+// Parse plain text transcript with timestamps
+function parsePlainTextTranscript(content) {
+  const segments = [];
+  const lines = content.split('\n').filter(line => line.trim());
+  
+  for (const line of lines) {
+    // Look for timestamp patterns like [00:00] or (00:00) or 00:00
+    const timeMatch = line.match(/(?:\[|\()?(\d{1,2}):(\d{2})(?:\]|\))?\s*(.+)/);
+    if (timeMatch) {
+      const minutes = parseInt(timeMatch[1]);
+      const seconds = parseInt(timeMatch[2]);
+      const text = timeMatch[3].trim();
+      const totalSeconds = minutes * 60 + seconds;
+      const timestamp = formatTime(totalSeconds);
+      
+      segments.push({
+        timestamp: timestamp,
+        text: text,
+        seconds: totalSeconds
+      });
+    }
+  }
+  
+  return segments;
+}
+
+// Helper function to format time in MM:SS format
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
+// Helper function to parse timestamp string to seconds
+function parseTime(timeString) {
   const parts = timeString.split(':').map(Number);
   if (parts.length === 2) {
     return parts[0] * 60 + parts[1];

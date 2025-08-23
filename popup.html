@@ -35,6 +35,16 @@
       </div>
       
       <div id="transcripts" class="tab-pane">
+        <div class="upload-section">
+          <h3>Upload Transcript</h3>
+          <p>Upload a transcript file to use with the bookmark feature:</p>
+          <div class="upload-controls">
+            <input type="file" id="transcriptFileInput" accept=".txt,.srt,.vtt,.json" style="display: none;">
+            <button id="uploadTranscriptBtn" class="upload-btn">📁 Choose File</button>
+            <span id="selectedFileName" class="selected-file"></span>
+          </div>
+          <button id="processTranscriptBtn" class="process-btn" style="display: none;">🔄 Process Transcript</button>
+        </div>
         <div class="items-container" id="transcriptsContainer">
           <div class="empty-state">No uploaded transcripts yet</div>
         </div>

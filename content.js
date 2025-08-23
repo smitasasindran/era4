@@ -26,6 +26,9 @@ function initialize() {
       bookmarkTimestamp();
     } else if (request.action === "jumpToTimestamp") {
       jumpToTimestamp(request.timestamp);
+    } else if (request.action === "updateTranscriptData") {
+      transcriptData = request.transcriptData;
+      showNotification(`Transcript updated with ${transcriptData.length} segments`, 'success');
     }
   });
   
