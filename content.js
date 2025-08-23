@@ -18,6 +18,11 @@ function initialize() {
   // Also try to load any previously saved local transcript
   loadSavedTranscript();
   
+  // Try to detect existing transcripts on the page
+  setTimeout(() => {
+    checkForExistingTranscripts();
+  }, 2000);
+  
   // Listen for messages from background script
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "takeScreenshot") {
@@ -42,6 +47,8 @@ function initialize() {
 // Get transcript data from YouTube
 async function getTranscriptData() {
   try {
+    console.log('Attempting to find transcript button...');
+    
     // Look for transcript button with multiple possible selectors
     let transcriptButton = document.querySelector('button[aria-label*="transcript"], button[aria-label*="Transcript"], button[aria-label*="Show transcript"], button[aria-label*="Open transcript"]');
     
@@ -54,10 +61,12 @@ async function getTranscriptData() {
       // Try looking for transcript in the more actions menu
       const moreActionsButton = document.querySelector('button[aria-label*="More actions"], button[aria-label*="More"], button[aria-label*="..."]');
       if (moreActionsButton) {
+        console.log('Found more actions button, checking for transcript option...');
         moreActionsButton.click();
         setTimeout(() => {
           const transcriptOption = document.querySelector('[aria-label*="transcript"], [aria-label*="Transcript"]');
           if (transcriptOption) {
+            console.log('Found transcript option in more actions menu');
             transcriptOption.click();
             setTimeout(() => {
               extractTranscriptData();
@@ -69,6 +78,7 @@ async function getTranscriptData() {
     }
     
     if (transcriptButton) {
+      console.log('Found transcript button, clicking...');
       transcriptButton.click();
       
       // Wait for transcript to load and then extract data
@@ -76,8 +86,11 @@ async function getTranscriptData() {
         extractTranscriptData();
       }, 1500);
     } else {
-      console.log('Transcript button not found - video may not have transcripts enabled');
-      // Don't show notification here as it might be annoying
+      console.log('Transcript button not found - trying alternative approach...');
+      // Try to find transcript panel that might already be open
+      setTimeout(() => {
+        extractTranscriptData();
+      }, 1000);
     }
   } catch (error) {
     console.log('Could not load transcript:', error);
@@ -87,15 +100,39 @@ async function getTranscriptData() {
 // Extract transcript data from the loaded transcript panel
 function extractTranscriptData() {
   try {
+    console.log('Extracting transcript data...');
+    
     // Look for transcript segments in different possible selectors
-    let transcriptItems = document.querySelectorAll('.ytd-transcript-segment-renderer, .ytd-transcript-segment-renderer, [data-segment-start-time]');
+    let transcriptItems = document.querySelectorAll('.ytd-transcript-segment-renderer, [data-segment-start-time], .ytd-transcript-segment-text');
     
     if (transcriptItems.length === 0) {
-      // Try alternative selectors
-      transcriptItems = document.querySelectorAll('[data-segment-start-time], .ytd-transcript-segment-text');
+      // Try alternative selectors for YouTube transcripts
+      transcriptItems = document.querySelectorAll('[data-segment-start-time], .ytd-transcript-segment-text, .ytd-transcript-segment-content');
+    }
+    
+    if (transcriptItems.length === 0) {
+      // Try looking for transcript panel that might already be open
+      const transcriptPanel = document.querySelector('ytd-transcript-renderer, .ytd-transcript-renderer');
+      if (transcriptPanel) {
+        console.log('Found transcript panel, looking for segments...');
+        transcriptItems = transcriptPanel.querySelectorAll('[data-segment-start-time], .ytd-transcript-segment-text, .ytd-transcript-segment-content');
+      }
+    }
+    
+    if (transcriptItems.length === 0) {
+      // Try one more approach - look for any elements with transcript-like content
+      const allElements = document.querySelectorAll('*');
+      transcriptItems = Array.from(allElements).filter(el => {
+        const text = el.textContent || '';
+        const hasTimestamp = /\d{1,2}:\d{2}/.test(text);
+        const hasText = text.length > 10 && text.length < 200;
+        return hasTimestamp && hasText && el.children.length === 0;
+      });
     }
     
     if (transcriptItems.length > 0) {
+      console.log(`Found ${transcriptItems.length} potential transcript items`);
+      
       transcriptData = Array.from(transcriptItems).map(item => {
         // Try to get timestamp from data attribute first
         let timestamp = item.getAttribute('data-segment-start-time');
@@ -109,10 +146,24 @@ function extractTranscriptData() {
           }
         }
         
-        // Get text content
-        const textElement = item.querySelector('.ytd-transcript-segment-text, .ytd-transcript-segment-content');
-        if (textElement) {
-          text = textElement.textContent.trim();
+        // If still no timestamp, try to extract from text content
+        if (!timestamp) {
+          const textContent = item.textContent || '';
+          const timeMatch = textContent.match(/(\d{1,2}:\d{2})/);
+          if (timeMatch) {
+            timestamp = timeMatch[1];
+            text = textContent.replace(timeMatch[0], '').trim();
+          }
+        }
+        
+        // Get text content if not already extracted
+        if (!text) {
+          const textElement = item.querySelector('.ytd-transcript-segment-text, .ytd-transcript-segment-content');
+          if (textElement) {
+            text = textElement.textContent.trim();
+          } else {
+            text = item.textContent.trim();
+          }
         }
         
         // Convert timestamp to seconds if it's a number
@@ -125,9 +176,13 @@ function extractTranscriptData() {
           text: text || '',
           seconds: timestamp ? parseTime(timestamp) : 0
         };
-      }).filter(item => item.text && item.timestamp); // Only keep items with both text and timestamp
+      }).filter(item => item.text && item.timestamp && item.text.length > 5); // Only keep items with both text and timestamp
       
-      console.log('Transcript data loaded:', transcriptData.length, 'segments');
+      console.log('Transcript data extracted:', transcriptData.length, 'segments');
+      
+      if (transcriptData.length > 0) {
+        showNotification(`Found ${transcriptData.length} transcript segments`, 'success');
+      }
     } else {
       console.log('No transcript segments found');
     }
@@ -474,6 +529,20 @@ function loadSavedTranscript() {
   }
 }
 
+// Check for existing transcripts on the page
+function checkForExistingTranscripts() {
+  console.log('Checking for existing transcripts on the page...');
+  
+  // Look for transcript panel that might already be open
+  const transcriptPanel = document.querySelector('ytd-transcript-renderer, .ytd-transcript-renderer, [data-segment-start-time]');
+  if (transcriptPanel) {
+    console.log('Found existing transcript panel, extracting data...');
+    extractTranscriptData();
+  } else {
+    console.log('No existing transcript panel found');
+  }
+}
+
 // Jump to specific timestamp in the video
 function jumpToTimestamp(timestamp) {
   const video = document.querySelector('video');
@@ -583,6 +652,25 @@ function addTranscriptRefreshButton() {
       getTranscriptData();
     };
     actionButtons.appendChild(refreshBtn);
+    
+    // Add manual transcript detection button
+    const detectBtn = document.createElement('button');
+    detectBtn.textContent = '🔍 Detect Transcript';
+    detectBtn.style.cssText = `
+      padding: 10px 15px;
+      background: #9C27B0;
+      color: white;
+      border: none;
+      border-radius: 25px;
+      cursor: pointer;
+      font-size: 14px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    `;
+    detectBtn.onclick = () => {
+      showNotification('Manually detecting transcript...', 'info');
+      extractTranscriptData();
+    };
+    actionButtons.appendChild(detectBtn);
     
     // Add upload transcript button
     const uploadBtn = document.createElement('button');

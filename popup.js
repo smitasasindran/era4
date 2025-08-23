@@ -432,6 +432,9 @@ function processTranscriptFile() {
           if (activeTab.url && activeTab.url.includes('youtube.com/watch')) {
             const videoId = new URL(activeTab.url).searchParams.get('v');
             if (videoId) {
+              console.log('Saving transcript for video ID:', videoId);
+              console.log('Transcript data:', parsedTranscript);
+              
               // Save transcript to storage
               chrome.storage.local.set({ 
                 [`transcript_${videoId}`]: {
@@ -440,10 +443,22 @@ function processTranscriptFile() {
                   date: new Date().toISOString()
                 }
               }, () => {
+                if (chrome.runtime.lastError) {
+                  console.error('Error saving transcript:', chrome.runtime.lastError);
+                  alert('Error saving transcript: ' + chrome.runtime.lastError.message);
+                  return;
+                }
+                
+                console.log('Transcript saved successfully');
+                
                 // Send message to content script to update transcript data
                 chrome.tabs.sendMessage(activeTab.id, {
                   action: "updateTranscriptData",
                   transcriptData: parsedTranscript
+                }, (response) => {
+                  if (chrome.runtime.lastError) {
+                    console.log('Content script not ready, but transcript saved');
+                  }
                 });
                 
                 // Refresh the transcripts tab
