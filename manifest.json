@@ -36,8 +36,8 @@
     },
     "bookmark-timestamp": {
       "suggested_key": {
-        "default": "Ctrl+Shift+B",
-        "mac": "Command+Shift+B"
+        "default": "Ctrl+Shift+P",
+        "mac": "Command+Shift+P"
       },
       "description": "Bookmark current timestamp with transcript"
     }
