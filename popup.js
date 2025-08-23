@@ -19,8 +19,10 @@ document.addEventListener('DOMContentLoaded', function() {
       // Load data for the selected tab
       if (targetTab === 'screenshots') {
         loadScreenshots();
-      } else {
+      } else if (targetTab === 'bookmarks') {
         loadBookmarks();
+      } else if (targetTab === 'transcripts') {
+        loadTranscripts();
       }
     });
   });
@@ -66,6 +68,27 @@ function loadBookmarks() {
     container.innerHTML = '';
     bookmarks.reverse().forEach(bookmark => {
       const item = createBookmarkItem(bookmark);
+      container.appendChild(item);
+    });
+  });
+}
+
+// Load and display uploaded transcripts
+function loadTranscripts() {
+  chrome.storage.local.get(null, (result) => {
+    const transcriptKeys = Object.keys(result).filter(key => key.startsWith('transcript_'));
+    const container = document.getElementById('transcriptsContainer');
+    
+    if (transcriptKeys.length === 0) {
+      container.innerHTML = '<div class="empty-state">No uploaded transcripts yet</div>';
+      return;
+    }
+    
+    container.innerHTML = '';
+    transcriptKeys.forEach(key => {
+      const transcript = result[key];
+      const videoId = key.replace('transcript_', '');
+      const item = createTranscriptItem(transcript, videoId);
       container.appendChild(item);
     });
   });
@@ -152,6 +175,36 @@ function createBookmarkItem(bookmark) {
   // Add click event to timestamp
   const timestampElement = item.querySelector('.clickable-timestamp');
   timestampElement.onclick = () => jumpToTimestamp(bookmark.timestamp, bookmark.videoId);
+  
+  return item;
+}
+
+// Create transcript item element
+function createTranscriptItem(transcript, videoId) {
+  const item = document.createElement('div');
+  item.className = 'item transcript-item';
+  
+  const transcriptInfo = document.createElement('div');
+  transcriptInfo.className = 'transcript-info';
+  transcriptInfo.innerHTML = `
+    <h4>📁 ${transcript.filename}</h4>
+    <p class="segments">📊 ${transcript.data.length} transcript segments</p>
+    <p class="date">📅 ${new Date(transcript.date).toLocaleDateString()}</p>
+    <p class="video-id">🎥 Video ID: ${videoId}</p>
+  `;
+  
+  const actions = document.createElement('div');
+  actions.className = 'item-actions';
+  
+  const deleteBtn = document.createElement('button');
+  deleteBtn.textContent = '🗑️ Delete';
+  deleteBtn.className = 'action-btn delete-btn';
+  deleteBtn.onclick = () => deleteTranscript(videoId);
+  
+  actions.appendChild(deleteBtn);
+  
+  item.appendChild(transcriptInfo);
+  item.appendChild(actions);
   
   return item;
 }
@@ -255,12 +308,22 @@ function deleteBookmark(id) {
   }
 }
 
+// Delete transcript
+function deleteTranscript(videoId) {
+  if (confirm('Are you sure you want to delete this transcript?')) {
+    chrome.storage.local.remove([`transcript_${videoId}`], () => {
+      loadTranscripts();
+    });
+  }
+}
+
 // Clear all data
 function clearAllData() {
   if (confirm('Are you sure you want to clear all data? This action cannot be undone.')) {
     chrome.storage.local.clear(() => {
       loadScreenshots();
       loadBookmarks();
+      loadTranscripts();
     });
   }
 }

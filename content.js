@@ -15,6 +15,9 @@ function initialize() {
   // Try to get transcript data
   getTranscriptData();
   
+  // Also try to load any previously saved local transcript
+  loadSavedTranscript();
+  
   // Listen for messages from background script
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "takeScreenshot") {
@@ -26,6 +29,9 @@ function initialize() {
     }
   });
   
+  // Add a button to manually refresh transcript data
+  addTranscriptRefreshButton();
+  
   // Add visual feedback elements
   addVisualFeedback();
 }
@@ -33,28 +39,97 @@ function initialize() {
 // Get transcript data from YouTube
 async function getTranscriptData() {
   try {
-    // Look for transcript button and click it to load transcripts
-    const transcriptButton = document.querySelector('button[aria-label*="transcript"], button[aria-label*="Transcript"]');
+    // Look for transcript button with multiple possible selectors
+    let transcriptButton = document.querySelector('button[aria-label*="transcript"], button[aria-label*="Transcript"], button[aria-label*="Show transcript"], button[aria-label*="Open transcript"]');
+    
+    if (!transcriptButton) {
+      // Try alternative selectors for transcript button
+      transcriptButton = document.querySelector('[aria-label*="transcript"], [aria-label*="Transcript"], [aria-label*="Show transcript"], [aria-label*="Open transcript"]');
+    }
+    
+    if (!transcriptButton) {
+      // Try looking for transcript in the more actions menu
+      const moreActionsButton = document.querySelector('button[aria-label*="More actions"], button[aria-label*="More"], button[aria-label*="..."]');
+      if (moreActionsButton) {
+        moreActionsButton.click();
+        setTimeout(() => {
+          const transcriptOption = document.querySelector('[aria-label*="transcript"], [aria-label*="Transcript"]');
+          if (transcriptOption) {
+            transcriptOption.click();
+            setTimeout(() => {
+              extractTranscriptData();
+            }, 1000);
+          }
+        }, 500);
+        return;
+      }
+    }
+    
     if (transcriptButton) {
       transcriptButton.click();
       
-      // Wait for transcript to load
+      // Wait for transcript to load and then extract data
       setTimeout(() => {
-        const transcriptItems = document.querySelectorAll('.ytd-transcript-segment-renderer');
-        if (transcriptItems.length > 0) {
-          transcriptData = Array.from(transcriptItems).map(item => {
-            const timestamp = item.querySelector('.ytd-transcript-segment-renderer');
-            const text = item.querySelector('.ytd-transcript-segment-text');
-            return {
-              timestamp: timestamp ? timestamp.textContent.trim() : '',
-              text: text ? text.textContent.trim() : ''
-            };
-          });
-        }
-      }, 1000);
+        extractTranscriptData();
+      }, 1500);
+    } else {
+      console.log('Transcript button not found - video may not have transcripts enabled');
+      // Don't show notification here as it might be annoying
     }
   } catch (error) {
     console.log('Could not load transcript:', error);
+  }
+}
+
+// Extract transcript data from the loaded transcript panel
+function extractTranscriptData() {
+  try {
+    // Look for transcript segments in different possible selectors
+    let transcriptItems = document.querySelectorAll('.ytd-transcript-segment-renderer, .ytd-transcript-segment-renderer, [data-segment-start-time]');
+    
+    if (transcriptItems.length === 0) {
+      // Try alternative selectors
+      transcriptItems = document.querySelectorAll('[data-segment-start-time], .ytd-transcript-segment-text');
+    }
+    
+    if (transcriptItems.length > 0) {
+      transcriptData = Array.from(transcriptItems).map(item => {
+        // Try to get timestamp from data attribute first
+        let timestamp = item.getAttribute('data-segment-start-time');
+        let text = '';
+        
+        if (!timestamp) {
+          // Fallback to looking for timestamp element
+          const timestampElement = item.querySelector('[data-segment-start-time], .ytd-transcript-segment-timestamp');
+          if (timestampElement) {
+            timestamp = timestampElement.textContent.trim();
+          }
+        }
+        
+        // Get text content
+        const textElement = item.querySelector('.ytd-transcript-segment-text, .ytd-transcript-segment-content');
+        if (textElement) {
+          text = textElement.textContent.trim();
+        }
+        
+        // Convert timestamp to seconds if it's a number
+        if (timestamp && !isNaN(timestamp)) {
+          timestamp = formatTime(parseFloat(timestamp));
+        }
+        
+        return {
+          timestamp: timestamp || '',
+          text: text || '',
+          seconds: timestamp ? parseTime(timestamp) : 0
+        };
+      }).filter(item => item.text && item.timestamp); // Only keep items with both text and timestamp
+      
+      console.log('Transcript data loaded:', transcriptData.length, 'segments');
+    } else {
+      console.log('No transcript segments found');
+    }
+  } catch (error) {
+    console.log('Error extracting transcript data:', error);
   }
 }
 
@@ -113,22 +188,35 @@ async function bookmarkTimestamp() {
     const currentTime = video.currentTime;
     const timestamp = formatTime(currentTime);
     
-    // Get transcript around current time (10 seconds before and after)
+    // Get transcript around current time (10 seconds before and 20 seconds after)
     let transcript = '';
-    if (transcriptData) {
-      const relevantTranscripts = transcriptData.filter(item => {
-        const itemTime = parseTime(item.timestamp);
-        return itemTime >= currentTime - 10 && itemTime <= currentTime + 10;
+    let relevantTranscripts = [];
+    
+    if (transcriptData && transcriptData.length > 0) {
+      relevantTranscripts = transcriptData.filter(item => {
+        // Use the seconds property if available, otherwise parse the timestamp
+        const itemTime = item.seconds || parseTime(item.timestamp);
+        return itemTime >= currentTime - 10 && itemTime <= currentTime + 20;
       });
       
-      transcript = relevantTranscripts.map(item => `${item.timestamp}: ${item.text}`).join('\n');
+      if (relevantTranscripts.length > 0) {
+        // Sort by time and format nicely
+        relevantTranscripts.sort((a, b) => (a.seconds || parseTime(a.timestamp)) - (b.seconds || parseTime(b.timestamp)));
+        
+        transcript = relevantTranscripts.map(item => {
+          const time = item.timestamp || formatTime(item.seconds || parseTime(item.timestamp));
+          return `${time}: ${item.text}`;
+        }).join('\n');
+        
+        console.log(`Found ${relevantTranscripts.length} transcript segments around timestamp ${timestamp}`);
+      }
     }
     
     if (!transcript) {
       transcript = 'No transcript available for this timestamp';
     }
     
-    // Save bookmark
+    // Save bookmark (always save, even without transcript)
     chrome.runtime.sendMessage({
       action: "saveBookmark",
       timestamp: timestamp,
@@ -137,7 +225,11 @@ async function bookmarkTimestamp() {
       transcript: transcript
     }, (response) => {
       if (response && response.success) {
-        showNotification(`Bookmark saved at ${timestamp}`, 'success');
+        if (relevantTranscripts.length > 0) {
+          showNotification(`Bookmark saved at ${timestamp} with ${relevantTranscripts.length} transcript segments`, 'success');
+        } else {
+          showNotification(`Bookmark saved at ${timestamp} (no transcript available)`, 'success');
+        }
       }
     });
     
@@ -163,6 +255,220 @@ function parseTime(timeString) {
     return parts[0] * 3600 + parts[1] * 60 + parts[2];
   }
   return 0;
+}
+
+// Upload local transcript file
+function uploadLocalTranscript() {
+  // Create a hidden file input
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.txt,.srt,.vtt,.json';
+  fileInput.style.display = 'none';
+  
+  fileInput.onchange = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const content = e.target.result;
+          parseLocalTranscript(content, file.name);
+        } catch (error) {
+          showNotification('Error reading transcript file', 'error');
+          console.error('Error reading file:', error);
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
+  
+  document.body.appendChild(fileInput);
+  fileInput.click();
+  document.body.removeChild(fileInput);
+}
+
+// Parse uploaded transcript file
+function parseLocalTranscript(content, filename) {
+  try {
+    let parsedTranscript = [];
+    
+    // Try to detect file format and parse accordingly
+    if (filename.endsWith('.srt')) {
+      parsedTranscript = parseSRTFile(content);
+    } else if (filename.endsWith('.vtt')) {
+      parsedTranscript = parseVTTFile(content);
+    } else if (filename.endsWith('.json')) {
+      parsedTranscript = parseJSONTranscript(content);
+    } else {
+      // Assume it's a plain text file with timestamps
+      parsedTranscript = parsePlainTextTranscript(content);
+    }
+    
+    if (parsedTranscript.length > 0) {
+      transcriptData = parsedTranscript;
+      
+      // Save transcript data to local storage for persistence
+      chrome.storage.local.set({ 
+        [`transcript_${currentVideoId}`]: {
+          data: parsedTranscript,
+          filename: filename,
+          date: new Date().toISOString()
+        }
+      });
+      
+      showNotification(`Successfully loaded ${parsedTranscript.length} transcript segments from ${filename}`, 'success');
+      console.log('Local transcript loaded:', parsedTranscript);
+    } else {
+      showNotification('No valid transcript data found in file', 'warning');
+    }
+  } catch (error) {
+    showNotification('Error parsing transcript file', 'error');
+    console.error('Error parsing transcript:', error);
+  }
+}
+
+// Parse SRT subtitle file
+function parseSRTFile(content) {
+  const segments = [];
+  const blocks = content.split('\n\n').filter(block => block.trim());
+  
+  for (const block of blocks) {
+    const lines = block.split('\n').filter(line => line.trim());
+    if (lines.length >= 3) {
+      const timeLine = lines[1];
+      const text = lines.slice(2).join(' ').trim();
+      
+      // Parse SRT timestamp format (00:00:00,000 --> 00:00:00,000)
+      const timeMatch = timeLine.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})/);
+      if (timeMatch) {
+        const hours = parseInt(timeMatch[1]);
+        const minutes = parseInt(timeMatch[2]);
+        const seconds = parseInt(timeMatch[3]);
+        const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+        const timestamp = formatTime(totalSeconds);
+        
+        segments.push({
+          timestamp: timestamp,
+          text: text,
+          seconds: totalSeconds
+        });
+      }
+    }
+  }
+  
+  return segments;
+}
+
+// Parse VTT subtitle file
+function parseVTTFile(content) {
+  const segments = [];
+  const lines = content.split('\n');
+  let currentTime = '';
+  let currentText = '';
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    
+    // Skip header lines
+    if (line === 'WEBVTT' || line === '' || line.includes('-->')) {
+      continue;
+    }
+    
+    // Check if line contains timestamp
+    const timeMatch = line.match(/(\d{2}):(\d{2}):(\d{2})\.(\d{3})/);
+    if (timeMatch) {
+      // Save previous segment if exists
+      if (currentTime && currentText) {
+        const totalSeconds = parseTime(currentTime);
+        segments.push({
+          timestamp: currentTime,
+          text: currentText.trim(),
+          seconds: totalSeconds
+        });
+      }
+      
+      currentTime = timeMatch[0];
+      currentText = '';
+    } else if (line && currentTime) {
+      currentText += line + ' ';
+    }
+  }
+  
+  // Add last segment
+  if (currentTime && currentText) {
+    const totalSeconds = parseTime(currentTime);
+    segments.push({
+      timestamp: currentTime,
+      text: currentText.trim(),
+      seconds: totalSeconds
+    });
+  }
+  
+  return segments;
+}
+
+// Parse JSON transcript file
+function parseJSONTranscript(content) {
+  try {
+    const data = JSON.parse(content);
+    if (Array.isArray(data)) {
+      return data.map(item => ({
+        timestamp: item.timestamp || item.time || formatTime(item.seconds || 0),
+        text: item.text || item.content || '',
+        seconds: item.seconds || parseTime(item.timestamp || item.time || '0:00')
+      }));
+    } else if (data.segments || data.transcript) {
+      const segments = data.segments || data.transcript;
+      return segments.map(item => ({
+        timestamp: item.timestamp || item.time || formatTime(item.seconds || 0),
+        text: item.text || item.content || '',
+        seconds: item.seconds || parseTime(item.timestamp || item.time || '0:00')
+      }));
+    }
+  } catch (error) {
+    console.error('Error parsing JSON:', error);
+  }
+  return [];
+}
+
+// Parse plain text transcript with timestamps
+function parsePlainTextTranscript(content) {
+  const segments = [];
+  const lines = content.split('\n').filter(line => line.trim());
+  
+  for (const line of lines) {
+    // Look for timestamp patterns like [00:00] or (00:00) or 00:00
+    const timeMatch = line.match(/(?:\[|\()?(\d{1,2}):(\d{2})(?:\]|\))?\s*(.+)/);
+    if (timeMatch) {
+      const minutes = parseInt(timeMatch[1]);
+      const seconds = parseInt(timeMatch[2]);
+      const text = timeMatch[3].trim();
+      const totalSeconds = minutes * 60 + seconds;
+      const timestamp = formatTime(totalSeconds);
+      
+      segments.push({
+        timestamp: timestamp,
+        text: text,
+        seconds: totalSeconds
+      });
+    }
+  }
+  
+  return segments;
+}
+
+// Load previously saved transcript data
+function loadSavedTranscript() {
+  if (currentVideoId) {
+    chrome.storage.local.get([`transcript_${currentVideoId}`], (result) => {
+      const savedTranscript = result[`transcript_${currentVideoId}`];
+      if (savedTranscript && savedTranscript.data) {
+        transcriptData = savedTranscript.data;
+        console.log(`Loaded saved transcript with ${transcriptData.length} segments from ${savedTranscript.filename}`);
+        showNotification(`Loaded saved transcript: ${savedTranscript.filename}`, 'info');
+      }
+    });
+  }
 }
 
 // Jump to specific timestamp in the video
@@ -251,6 +557,48 @@ function addVisualFeedback() {
   actionButtons.appendChild(screenshotBtn);
   actionButtons.appendChild(bookmarkBtn);
   document.body.appendChild(actionButtons);
+}
+
+// Add transcript refresh button
+function addTranscriptRefreshButton() {
+  const actionButtons = document.getElementById('youtube-notes-actions');
+  if (actionButtons) {
+    const refreshBtn = document.createElement('button');
+    refreshBtn.textContent = '🔄 Refresh Transcript';
+    refreshBtn.style.cssText = `
+      padding: 10px 15px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 25px;
+      cursor: pointer;
+      font-size: 14px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    `;
+    refreshBtn.onclick = () => {
+      showNotification('Refreshing transcript data...', 'info');
+      getTranscriptData();
+    };
+    actionButtons.appendChild(refreshBtn);
+    
+    // Add upload transcript button
+    const uploadBtn = document.createElement('button');
+    uploadBtn.textContent = '📁 Upload Transcript';
+    uploadBtn.style.cssText = `
+      padding: 10px 15px;
+      background: #FF9800;
+      color: white;
+      border: none;
+      border-radius: 25px;
+      cursor: pointer;
+      font-size: 14px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    `;
+    uploadBtn.onclick = () => {
+      uploadLocalTranscript();
+    };
+    actionButtons.appendChild(uploadBtn);
+  }
 }
 
 // Show notification
