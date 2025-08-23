@@ -21,6 +21,8 @@ function initialize() {
       takeScreenshot();
     } else if (request.action === "bookmarkTimestamp") {
       bookmarkTimestamp();
+    } else if (request.action === "jumpToTimestamp") {
+      jumpToTimestamp(request.timestamp);
     }
   });
   
@@ -161,6 +163,34 @@ function parseTime(timeString) {
     return parts[0] * 3600 + parts[1] * 60 + parts[2];
   }
   return 0;
+}
+
+// Jump to specific timestamp in the video
+function jumpToTimestamp(timestamp) {
+  const video = document.querySelector('video');
+  if (!video) {
+    showNotification('No video found on page', 'error');
+    return;
+  }
+  
+  const seconds = parseTime(timestamp);
+  if (seconds >= 0) {
+    // Add a small delay to ensure video is ready
+    setTimeout(() => {
+      video.currentTime = seconds;
+      showNotification(`Jumped to ${timestamp}`, 'success');
+      
+      // Scroll video into view if needed
+      video.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      
+      // Pause video at the timestamp for better viewing
+      if (!video.paused) {
+        video.pause();
+      }
+    }, 100);
+  } else {
+    showNotification('Invalid timestamp format', 'error');
+  }
 }
 
 // Add visual feedback elements

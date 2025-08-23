@@ -80,7 +80,7 @@ function createScreenshotItem(screenshot) {
   videoInfo.className = 'video-info';
   videoInfo.innerHTML = `
     <h4>${screenshot.videoTitle}</h4>
-    <p class="timestamp">⏰ ${screenshot.timestamp}</p>
+    <p class="timestamp clickable-timestamp" data-timestamp="${screenshot.timestamp}" data-video-id="${screenshot.videoId}">⏰ ${screenshot.timestamp}</p>
     <p class="date">📅 ${new Date(screenshot.date).toLocaleDateString()}</p>
   `;
   
@@ -103,6 +103,10 @@ function createScreenshotItem(screenshot) {
   item.appendChild(videoInfo);
   item.appendChild(actions);
   
+  // Add click event to timestamp
+  const timestampElement = item.querySelector('.clickable-timestamp');
+  timestampElement.onclick = () => jumpToTimestamp(screenshot.timestamp, screenshot.videoId);
+  
   return item;
 }
 
@@ -115,7 +119,7 @@ function createBookmarkItem(bookmark) {
   videoInfo.className = 'video-info';
   videoInfo.innerHTML = `
     <h4>${bookmark.videoTitle}</h4>
-    <p class="timestamp">⏰ ${bookmark.timestamp}</p>
+    <p class="timestamp clickable-timestamp" data-timestamp="${bookmark.timestamp}" data-video-id="${bookmark.videoId}">⏰ ${bookmark.timestamp}</p>
     <p class="date">📅 ${new Date(bookmark.date).toLocaleDateString()}</p>
   `;
   
@@ -144,6 +148,10 @@ function createBookmarkItem(bookmark) {
   item.appendChild(videoInfo);
   item.appendChild(transcript);
   item.appendChild(actions);
+  
+  // Add click event to timestamp
+  const timestampElement = item.querySelector('.clickable-timestamp');
+  timestampElement.onclick = () => jumpToTimestamp(bookmark.timestamp, bookmark.videoId);
   
   return item;
 }
@@ -276,4 +284,45 @@ function exportData() {
     
     URL.revokeObjectURL(url);
   });
+}
+
+// Jump to specific timestamp in the video
+function jumpToTimestamp(timestamp, videoId) {
+  // Find the active tab with YouTube
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const activeTab = tabs[0];
+    
+    // Check if we're already on a YouTube video page
+    if (activeTab.url && activeTab.url.includes('youtube.com/watch')) {
+      // Check if this is the same video
+      const currentVideoId = new URL(activeTab.url).searchParams.get('v');
+      
+      if (currentVideoId === videoId) {
+        // We're on the same video, just jump to timestamp
+        chrome.tabs.sendMessage(activeTab.id, {
+          action: "jumpToTimestamp",
+          timestamp: timestamp
+        });
+      } else {
+        // Different video, navigate to the correct video with timestamp
+        const newUrl = `https://www.youtube.com/watch?v=${videoId}&t=${parseTimeToSeconds(timestamp)}`;
+        chrome.tabs.update(activeTab.id, { url: newUrl });
+      }
+    } else {
+      // Not on YouTube, open new tab with the video and timestamp
+      const newUrl = `https://www.youtube.com/watch?v=${videoId}&t=${parseTimeToSeconds(timestamp)}`;
+      chrome.tabs.create({ url: newUrl });
+    }
+  });
+}
+
+// Helper function to convert timestamp string to seconds
+function parseTimeToSeconds(timeString) {
+  const parts = timeString.split(':').map(Number);
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1];
+  } else if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+  return 0;
 }
