@@ -182,6 +182,7 @@ function extractTranscriptData() {
       
       if (transcriptData.length > 0) {
         showNotification(`Found ${transcriptData.length} transcript segments`, 'success');
+        console.log('Transcript data:', transcriptData);
       }
     } else {
       console.log('No transcript segments found');
@@ -267,6 +268,7 @@ async function bookmarkTimestamp() {
         }).join('\n');
         
         console.log(`Found ${relevantTranscripts.length} transcript segments around timestamp ${timestamp}`);
+        console.log('Relevant transcripts:', relevantTranscripts);
       }
     }
     
