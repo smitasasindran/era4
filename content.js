@@ -37,11 +37,13 @@ function initialize() {
     }
   });
   
-  // Add a button to manually refresh transcript data
-  addTranscriptRefreshButton();
-  
-  // Add visual feedback elements
+  // Add visual feedback elements first (creates the button container)
   addVisualFeedback();
+  
+  // Then add transcript buttons to the container with a small delay
+  setTimeout(() => {
+    addTranscriptRefreshButton();
+  }, 100);
 }
 
 // Get transcript data from YouTube
@@ -635,8 +637,13 @@ function addVisualFeedback() {
 
 // Add transcript refresh button
 function addTranscriptRefreshButton() {
+  console.log('Adding transcript buttons...');
   const actionButtons = document.getElementById('youtube-notes-actions');
+  console.log('Action buttons container:', actionButtons);
+  
   if (actionButtons) {
+    console.log('Creating transcript buttons...');
+    
     const refreshBtn = document.createElement('button');
     refreshBtn.textContent = '🔄 Refresh Transcript';
     refreshBtn.style.cssText = `
@@ -654,6 +661,7 @@ function addTranscriptRefreshButton() {
       getTranscriptData();
     };
     actionButtons.appendChild(refreshBtn);
+    console.log('Added refresh button');
     
     // Add manual transcript detection button
     const detectBtn = document.createElement('button');
@@ -673,6 +681,7 @@ function addTranscriptRefreshButton() {
       extractTranscriptData();
     };
     actionButtons.appendChild(detectBtn);
+    console.log('Added detect button');
     
     // Add upload transcript button
     const uploadBtn = document.createElement('button');
@@ -691,6 +700,11 @@ function addTranscriptRefreshButton() {
       uploadLocalTranscript();
     };
     actionButtons.appendChild(uploadBtn);
+    console.log('Added upload button');
+    
+    console.log('All transcript buttons added successfully');
+  } else {
+    console.error('Action buttons container not found!');
   }
 }
 
