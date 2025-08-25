@@ -249,7 +249,7 @@ async function bookmarkTimestamp() {
     const currentTime = video.currentTime;
     const timestamp = formatTime(currentTime);
     
-    // Get transcript around current time (10 seconds before and 20 seconds after)
+    // Get transcript around current time (20 seconds before and 20 seconds after)
     let transcript = '';
     let relevantTranscripts = [];
     
@@ -257,7 +257,7 @@ async function bookmarkTimestamp() {
       relevantTranscripts = transcriptData.filter(item => {
         // Use the seconds property if available, otherwise parse the timestamp
         const itemTime = item.seconds || parseTime(item.timestamp);
-        return itemTime >= currentTime - 10 && itemTime <= currentTime + 20;
+        return itemTime >= currentTime - 20 && itemTime <= currentTime + 20;
       });
       
       if (relevantTranscripts.length > 0) {
