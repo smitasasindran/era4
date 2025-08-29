@@ -25,7 +25,8 @@
 
 .header-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .clear-btn, .export-btn {
@@ -361,5 +362,14 @@
   
   .tab-content {
     padding: 15px;
+  }
+  
+  .header-actions {
+    gap: 4px;
+  }
+  
+  .clear-btn, .export-btn {
+    padding: 4px 8px;
+    font-size: 11px;
   }
 }

@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', function() {
   // Event listeners for buttons
   document.getElementById('clearAllBtn').addEventListener('click', clearAllData);
   document.getElementById('exportBtn').addEventListener('click', exportData);
+  document.getElementById('exportPdfBtn').addEventListener('click', exportPdfData);
   
   // Transcript upload event listeners
   document.getElementById('uploadTranscriptBtn').addEventListener('click', () => {
@@ -354,6 +355,201 @@ function exportData() {
     a.click();
     
     URL.revokeObjectURL(url);
+  });
+}
+
+// Export data as PDF
+function exportPdfData() {
+  chrome.storage.local.get(['screenshots', 'bookmarks'], (result) => {
+    const screenshots = result.screenshots || [];
+    const bookmarks = result.bookmarks || [];
+    
+    if (screenshots.length === 0 && bookmarks.length === 0) {
+      alert('No data to export. Please create some screenshots or bookmarks first.');
+      return;
+    }
+    
+    // Create PDF document
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    
+    // Set document properties
+    doc.setProperties({
+      title: 'YouTube Notes & Screenshots',
+      subject: 'Exported notes from YouTube videos',
+      author: 'YouTube Notes Extension',
+      creator: 'YouTube Notes Extension'
+    });
+    
+    // Add title
+    doc.setFontSize(20);
+    doc.text('YouTube Notes & Screenshots', 20, 20);
+    
+    // Add export date
+    doc.setFontSize(12);
+    doc.text(`Exported on: ${new Date().toLocaleString()}`, 20, 30);
+    
+    let yPosition = 50;
+    
+    // Combine all items and sort by date
+    const allItems = [];
+    
+    // Add screenshots
+    screenshots.forEach(screenshot => {
+      allItems.push({
+        type: 'screenshot',
+        timestamp: screenshot.timestamp,
+        videoTitle: screenshot.videoTitle,
+        date: new Date(screenshot.date),
+        data: screenshot
+      });
+    });
+    
+    // Add bookmarks
+    bookmarks.forEach(bookmark => {
+      allItems.push({
+        type: 'bookmark',
+        timestamp: bookmark.timestamp,
+        videoTitle: bookmark.videoTitle,
+        date: new Date(bookmark.date),
+        data: bookmark
+      });
+    });
+    
+    // Sort by date (oldest first)
+    allItems.sort((a, b) => a.date - b.date);
+    
+    // Group by video
+    const groupedByVideo = {};
+    allItems.forEach(item => {
+      if (!groupedByVideo[item.videoTitle]) {
+        groupedByVideo[item.videoTitle] = [];
+      }
+      groupedByVideo[item.videoTitle].push(item);
+    });
+    
+    // Process each video
+    Object.keys(groupedByVideo).forEach(videoTitle => {
+      const items = groupedByVideo[videoTitle];
+      
+      // Add video title as section header
+      if (yPosition > 250) {
+        doc.addPage();
+        yPosition = 20;
+      }
+      
+      doc.setFontSize(16);
+      doc.setTextColor(0, 0, 255);
+      doc.text(`📹 ${videoTitle}`, 20, yPosition);
+      yPosition += 15;
+      
+      // Sort items within video by timestamp
+      items.sort((a, b) => {
+        const timeA = parseTimeToSeconds(a.timestamp);
+        const timeB = parseTimeToSeconds(b.timestamp);
+        return timeA - timeB;
+      });
+      
+      // Process each item
+      items.forEach(item => {
+        if (yPosition > 250) {
+          doc.addPage();
+          yPosition = 20;
+        }
+        
+        // Add timestamp header
+        doc.setFontSize(14);
+        doc.setTextColor(255, 0, 0);
+        doc.text(`⏰ ${item.timestamp}`, 20, yPosition);
+        yPosition += 10;
+        
+        // Add item type and content
+        doc.setFontSize(12);
+        doc.setTextColor(0, 0, 0);
+        
+        if (item.type === 'screenshot') {
+          doc.text('📸 Screenshot', 25, yPosition);
+          yPosition += 8;
+          
+          // Add screenshot image if possible
+          try {
+            const img = new Image();
+            img.src = item.data.screenshot;
+            img.onload = () => {
+              // Calculate image dimensions to fit on page
+              const maxWidth = 150;
+              const maxHeight = 100;
+              let imgWidth = img.width;
+              let imgHeight = img.height;
+              
+              if (imgWidth > maxWidth) {
+                imgHeight = (imgHeight * maxWidth) / imgWidth;
+                imgWidth = maxWidth;
+              }
+              if (imgHeight > maxHeight) {
+                imgWidth = (imgWidth * maxHeight) / imgHeight;
+                imgHeight = maxHeight;
+              }
+              
+              // Add image to PDF
+              doc.addImage(item.data.screenshot, 'PNG', 25, yPosition, imgWidth, imgHeight);
+              yPosition += imgHeight + 10;
+            };
+          } catch (error) {
+            doc.text('(Screenshot image could not be embedded)', 25, yPosition);
+            yPosition += 8;
+          }
+        } else if (item.type === 'bookmark') {
+          doc.text('🔖 Bookmark with Transcript', 25, yPosition);
+          yPosition += 8;
+          
+          // Add transcript text
+          const transcript = item.data.transcript;
+          if (transcript && transcript !== 'No transcript available for this timestamp') {
+            doc.setFontSize(10);
+            doc.setTextColor(100, 100, 100);
+            
+            // Split transcript into lines that fit on page
+            const maxLineLength = 80;
+            const lines = [];
+            let currentLine = '';
+            
+            transcript.split(' ').forEach(word => {
+              if ((currentLine + ' ' + word).length <= maxLineLength) {
+                currentLine += (currentLine ? ' ' : '') + word;
+              } else {
+                if (currentLine) lines.push(currentLine);
+                currentLine = word;
+              }
+            });
+            if (currentLine) lines.push(currentLine);
+            
+            lines.forEach(line => {
+              if (yPosition > 250) {
+                doc.addPage();
+                yPosition = 20;
+              }
+              doc.text(line, 30, yPosition);
+              yPosition += 6;
+            });
+            
+            doc.setTextColor(0, 0, 0);
+            doc.setFontSize(12);
+          }
+        }
+        
+        yPosition += 15; // Add spacing between items
+      });
+      
+      yPosition += 10; // Add spacing between videos
+    });
+    
+    // Save the PDF
+    const filename = `youtube-notes-${new Date().toISOString().split('T')[0]}.pdf`;
+    doc.save(filename);
+    
+    // Show success message
+    alert(`PDF exported successfully as ${filename}`);
   });
 }
 
