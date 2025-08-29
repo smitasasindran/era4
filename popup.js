@@ -360,36 +360,63 @@ function exportData() {
 
 // Export data as PDF
 function exportPdfData() {
+  console.log('PDF export started...');
+  
   chrome.storage.local.get(['screenshots', 'bookmarks'], (result) => {
+    console.log('Storage data retrieved:', result);
+    
     const screenshots = result.screenshots || [];
     const bookmarks = result.bookmarks || [];
     
+    console.log('Screenshots count:', screenshots.length);
+    console.log('Bookmarks count:', bookmarks.length);
+    
     if (screenshots.length === 0 && bookmarks.length === 0) {
+      console.log('No data to export');
       alert('No data to export. Please create some screenshots or bookmarks first.');
       return;
     }
     
+    console.log('Creating PDF document...');
+    
+    // Check if jsPDF is available
+    if (!window.jspdf) {
+      console.error('jsPDF library not loaded!');
+      alert('PDF library not loaded. Please refresh the page and try again.');
+      return;
+    }
+    
+    console.log('jsPDF library found:', window.jspdf);
+    
     // Create PDF document
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
+    console.log('jsPDF constructor:', jsPDF);
     
-    // Set document properties
-    doc.setProperties({
-      title: 'YouTube Notes & Screenshots',
-      subject: 'Exported notes from YouTube videos',
-      author: 'YouTube Notes Extension',
-      creator: 'YouTube Notes Extension'
-    });
+    try {
+      const doc = new jsPDF();
+      console.log('PDF document created successfully:', doc);
     
-    // Add title
-    doc.setFontSize(20);
-    doc.text('YouTube Notes & Screenshots', 20, 20);
+      // Set document properties
+      doc.setProperties({
+        title: 'YouTube Notes & Screenshots',
+        subject: 'Exported notes from YouTube videos',
+        author: 'YouTube Notes Extension',
+        creator: 'YouTube Notes Extension'
+      });
+      
+      console.log('Document properties set');
+      
+      // Add title
+      doc.setFontSize(20);
+      doc.text('YouTube Notes & Screenshots', 20, 20);
+      
+      // Add export date
+      doc.setFontSize(12);
+      doc.text(`Exported on: ${new Date().toLocaleString()}`, 20, 30);
+      
+      console.log('Title and date added to PDF');
     
-    // Add export date
-    doc.setFontSize(12);
-    doc.text(`Exported on: ${new Date().toLocaleString()}`, 20, 30);
-    
-    let yPosition = 50;
+      let yPosition = 50;
     
     // Combine all items and sort by date
     const allItems = [];
@@ -418,6 +445,7 @@ function exportPdfData() {
     
     // Sort by date (oldest first)
     allItems.sort((a, b) => a.date - b.date);
+    console.log('Sorted items by date');
     
     // Group by video
     const groupedByVideo = {};
@@ -428,9 +456,12 @@ function exportPdfData() {
       groupedByVideo[item.videoTitle].push(item);
     });
     
+    console.log('Grouped by video:', Object.keys(groupedByVideo));
+    
     // Process each video
     Object.keys(groupedByVideo).forEach(videoTitle => {
       const items = groupedByVideo[videoTitle];
+      console.log(`Processing video: ${videoTitle} with ${items.length} items`);
       
       // Add video title as section header
       if (yPosition > 250) {
@@ -546,10 +577,18 @@ function exportPdfData() {
     
     // Save the PDF
     const filename = `youtube-notes-${new Date().toISOString().split('T')[0]}.pdf`;
+    console.log('Saving PDF as:', filename);
+    
     doc.save(filename);
+    console.log('PDF saved successfully');
     
     // Show success message
     alert(`PDF exported successfully as ${filename}`);
+    
+  } catch (error) {
+    console.error('Error creating PDF:', error);
+    alert('Error creating PDF: ' + error.message);
+  }
   });
 }
 
