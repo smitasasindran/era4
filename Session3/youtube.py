@@ -20,6 +20,23 @@ def ytdlp_extract(url: str) -> Dict[str, Any]:
         return ydl.extract_info(url, download=False)
 
 
+def ytdlp_get_stream_url(url: str) -> str:
+    """
+    Return the direct video stream URL (best available mp4 with audio).
+    Equivalent to `yt-dlp -g`.
+    """
+    import yt_dlp
+    ydl_opts = {
+        'format': 'bv*[vcodec^=avc1][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best',
+        'quiet': True,
+        'noplaylist': True,
+        'cachedir': False,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        return info.get("url")
+
+
 def ytdlp_download_best_mp4(url: str, out_dir: str) -> str:
     import yt_dlp
     os.makedirs(out_dir, exist_ok=True)

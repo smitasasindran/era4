@@ -4,7 +4,8 @@ import tempfile
 import argparse
 
 from utils import extract_video_id, ffmpeg_screenshot, human_time
-from youtube import ytdlp_extract, ytdlp_download_best_mp4, fetch_transcript, segments_to_text
+from youtube import ytdlp_extract, fetch_transcript, segments_to_text
+from youtube import ytdlp_get_stream_url
 from gemini import init_gemini, call_gemini_sections
 from pdf_builder import build_pdf, Section
 
@@ -14,10 +15,10 @@ def main():
     parser.add_argument('--url', required=True)
     parser.add_argument('--out', required=True)
     parser.add_argument('--lang', default='en')
-    parser.add_argument('--use-auto', action='store_true')
+    parser.add_argument('--use-auto', action='store_true', default=True)
     parser.add_argument('--model', default='gemini-1.5-flash')
     parser.add_argument('--max-sections', type=int, default=8)
-    parser.add_argument('--screenshots', action='store_true')
+    parser.add_argument('--screenshots', action='store_true', default=True)
     parser.add_argument('--workdir', default=None)
     args = parser.parse_args()
 
@@ -47,15 +48,15 @@ def main():
         sections.append(s)
 
     if args.screenshots:
-        workdir = args.workdir or tempfile.mkdtemp(prefix="yt2pdf_")
-        video_path = ytdlp_download_best_mp4(args.url, out_dir=os.path.join(workdir, 'video'))
+        workdir = args.workdir if args.workdir else ""
+        stream_url = ytdlp_get_stream_url(args.url)
         shots_dir = os.path.join(workdir, 'shots')
         os.makedirs(shots_dir, exist_ok=True)
         for i, s in enumerate(sections, 1):
             mid = max(0, (s.start + s.end) / 2.0)
             shot_path = os.path.join(shots_dir, f"section_{i:02d}.jpg")
             try:
-                ffmpeg_screenshot(video_path, mid, shot_path)
+                ffmpeg_screenshot(stream_url, mid, shot_path)
                 s.screenshot_path = shot_path
             except Exception as e:
                 print(f"Failed screenshot section {i}: {e}")

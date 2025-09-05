@@ -8,7 +8,6 @@ def ensure_dir(path: str):
 
 YOUTUBE_ID_RE = re.compile(r"(?:(?:v=|be/|shorts/))([\w-]{11})")
 
-
 def extract_video_id(url: str) -> str:
     m = YOUTUBE_ID_RE.search(url)
     if m:
@@ -19,9 +18,21 @@ def extract_video_id(url: str) -> str:
     raise ValueError(f"Could not parse a YouTube video ID from URL: {url}")
 
 
-def ffmpeg_screenshot(input_path: str, ts_seconds: float, out_path: str) -> None:
+def ffmpeg_screenshot(input_source: str, ts_seconds: float, out_path: str) -> None:
+    """
+    Capture a single frame at ts_seconds from either a local file path
+    or a remote media URL (e.g. from yt-dlp -g).
+    """
     ensure_dir(out_path)
-    cmd = ["ffmpeg", "-y", "-ss", str(ts_seconds), "-i", input_path, "-vframes", "1", "-q:v", "2", out_path]
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-ss", str(ts_seconds),
+        "-i", input_source,
+        "-frames:v", "1",
+        "-q:v", "2",
+        out_path,
+    ]
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
