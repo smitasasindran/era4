@@ -116,12 +116,18 @@ def call_gemini_sections(model, transcript_text: str, max_sections: int = 8) -> 
     if 'json' in txt:
         txt = txt[8:-3]
 
+    # 0) Try parsing as-is
+    try:
+        return json.loads(txt)
+    except Exception:
+        pass
+
     # 1) Extract candidate JSON string robustly
     candidate = _extract_json_candidate_from_text(txt)
     if not candidate:
         raise RuntimeError("Could not find a JSON payload in Gemini output. Raw output:\n" + txt)
 
-    # 2) Try parsing as-is
+    # 2) Try parsing candidate
     try:
         return json.loads(candidate)
     except Exception:
