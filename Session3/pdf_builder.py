@@ -25,6 +25,7 @@ def build_pdf(out_path: str, title: str, video_url: str, sections: List[Section]
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name='TitleCenter', parent=styles['Title'], alignment=TA_CENTER, spaceAfter=18))
     styles.add(ParagraphStyle(name='H2', parent=styles['Heading2'], spaceBefore=12, spaceAfter=6))
+    styles.add(ParagraphStyle(name='H3', parent=styles['Heading3'], spaceBefore=8, spaceAfter=4))
     styles.add(ParagraphStyle(name='Body', parent=styles['BodyText'], leading=16))
 
     story = []
@@ -32,12 +33,17 @@ def build_pdf(out_path: str, title: str, video_url: str, sections: List[Section]
     story.append(Paragraph(f"Source: <a href='{video_url}' color='blue'>{video_url}</a>", styles['Body']))
     story.append(Spacer(1, 0.4*inch))
 
-    story.append(Paragraph("Key Sections", styles['H2']))
+    # --- Table of Contents ---
+    story.append(Paragraph("<a name='toc'/>Key Sections", styles['H2']))
     for i, s in enumerate(sections, 1):
-        story.append(Paragraph(f"{i}. {s.title}  —  {human_time(s.start)}–{human_time(s.end)}", styles['Body']))
+        toc_entry = f"<a href='#section_{i}' color='blue'>{i}. {s.title}</a>  —  {human_time(s.start)}–{human_time(s.end)}"
+        story.append(Paragraph(toc_entry, styles['Body']))
     story.append(PageBreak())
 
+    # --- Detailed Sections ---
     for i, s in enumerate(sections, 1):
+        # Anchor for internal link target
+        story.append(Paragraph(f"<a name='section_{i}'/>", styles['Body']))
         story.append(Paragraph(f"{i}. {s.title}", styles['H2']))
         story.append(Paragraph(f"Timestamp: {human_time(s.start)}–{human_time(s.end)}", styles['Body']))
         story.append(Spacer(1, 0.1*inch))
@@ -51,12 +57,15 @@ def build_pdf(out_path: str, title: str, video_url: str, sections: List[Section]
                 story.append(Spacer(1, 0.15*inch))
             except Exception:
                 pass
-        story.append(Paragraph("Summary", styles['H4']))
+        # Summary with smaller heading
+        story.append(Paragraph("Summary", styles['H3']))
         story.append(Paragraph(s.summary, styles['Body']))
         if s.key_points:
             bullets = "".join([f"<li>{p}</li>" for p in s.key_points])
             story.append(Paragraph(f"<ul>{bullets}</ul>", styles['Body']))
-        # Continuous flow: no page break unless explicitly requested
+        # Add back link
+        story.append(Spacer(1, 0.2*inch))
+        story.append(Paragraph("<a href='#toc' color='blue'>Back to Key Sections</a>", styles['Body']))
         if not continuous and i < len(sections):
             story.append(PageBreak())
         else:
