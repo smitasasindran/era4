@@ -4,8 +4,7 @@ import tempfile
 import argparse
 
 from utils import extract_video_id, ffmpeg_screenshot, human_time
-from youtube import ytdlp_extract, fetch_transcript, segments_to_text
-from youtube import ytdlp_get_stream_url
+from youtube import ytdlp_extract, ytdlp_get_stream_url, fetch_transcript, segments_to_text
 from gemini import init_gemini, call_gemini_sections
 from pdf_builder import build_pdf, Section
 
@@ -27,12 +26,11 @@ def main():
     title = info.get('title') or f"YouTube Video {video_id}"
 
     segs = fetch_transcript(video_id, lang=args.lang, use_auto=args.use_auto)
-    # print(f"Original segs: {segs}")
     transcript_text = segments_to_text(segs)
-    # print(f"Transcript text: {transcript_text}")
     print(f"Got transcripts from youtube video")
 
     model = init_gemini(args.model)
+    print(f"Getting sections and summary from Gemini")
     sections_json = call_gemini_sections(model, transcript_text, max_sections=args.max_sections)
     raw_sections = sections_json.get('sections', [])
     print(f"\n\nGemini raw sections: {raw_sections}")
@@ -49,20 +47,28 @@ def main():
         sections.append(s)
 
     if args.screenshots:
-        workdir = args.workdir if args.workdir else ""
-        stream_url = ytdlp_get_stream_url(args.url)
+        workdir = args.workdir or tempfile.mkdtemp(prefix=f"yt2pdf_{video_id}")
         shots_dir = os.path.join(workdir, 'shots')
         os.makedirs(shots_dir, exist_ok=True)
-        for i, s in enumerate(sections, 1):
-            mid = max(0, (s.start + s.end) / 2.0)
-            shot_path = os.path.join(shots_dir, f"section_{i:02d}.jpg")
-            try:
-                ffmpeg_screenshot(stream_url, mid, shot_path)
-                s.screenshot_path = shot_path
-            except Exception as e:
-                print(f"Failed screenshot section {i}: {e}")
 
-    build_pdf(args.out, title=title, video_url=args.url, sections=sections)
+        try:
+            stream_url = ytdlp_get_stream_url(args.url)
+        except Exception as e:
+            print(f"Failed to resolve stream URL for screenshots: {e}")
+            stream_url = None
+
+        if stream_url:
+            for i, s in enumerate(sections, 1):
+                mid = max(0, (s.start + s.end) / 2.0)
+                shot_path = os.path.join(shots_dir, f"section_{i:02d}.jpg")
+                try:
+                    ffmpeg_screenshot(stream_url, mid, shot_path)
+                    s.screenshot_path = shot_path
+                except Exception as e:
+                    print(f"⚠️ Failed screenshot section {i}: {e}")
+
+    # Pass a flag to pdf_builder so it uses continuous layout
+    build_pdf(args.out, title=title, video_url=args.url, sections=sections, continuous=True)
     print(f"Done. Wrote {args.out}")
 
 

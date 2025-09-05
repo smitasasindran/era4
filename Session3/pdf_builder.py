@@ -4,10 +4,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
-# from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak
-from reportlab.platypus.tableofcontents import TableOfContents
-from reportlab.lib import colors
 from PIL import Image as PILImage
 
 from utils import ensure_dir, human_time
@@ -22,7 +19,7 @@ class Section:
         self.screenshot_path = screenshot_path
 
 
-def build_pdf(out_path: str, title: str, video_url: str, sections: List[Section], page_size=A4):
+def build_pdf(out_path: str, title: str, video_url: str, sections: List[Section], page_size=A4, continuous=False):
     ensure_dir(out_path)
     doc = SimpleDocTemplate(out_path, pagesize=page_size, leftMargin=54, rightMargin=54, topMargin=54, bottomMargin=54)
     styles = getSampleStyleSheet()
@@ -35,21 +32,13 @@ def build_pdf(out_path: str, title: str, video_url: str, sections: List[Section]
     story.append(Paragraph(f"Source: <a href='{video_url}' color='blue'>{video_url}</a>", styles['Body']))
     story.append(Spacer(1, 0.4*inch))
 
-    # Add Table of Contents
-    story.append(Paragraph("Table of Contents", styles['H2']))
-    toc = TableOfContents()
-    toc.levelStyles = [
-        ParagraphStyle(fontName='Times-Bold', fontSize=12, name='TOCHeading1', leftIndent=20, firstLineIndent=-20, spaceBefore=5, leading=14),
-    ]
-    story.append(toc)
+    story.append(Paragraph("Key Sections", styles['H2']))
+    for i, s in enumerate(sections, 1):
+        story.append(Paragraph(f"{i}. {s.title}  —  {human_time(s.start)}–{human_time(s.end)}", styles['Body']))
     story.append(PageBreak())
 
     for i, s in enumerate(sections, 1):
-        # notify TOC
-        story.append(Paragraph(f"<bookmark name='section{i}'/>", styles['Body']))
         story.append(Paragraph(f"{i}. {s.title}", styles['H2']))
-        story[-1].__dict__['_bookmarkName'] = f'section{i}'
-
         story.append(Paragraph(f"Timestamp: {human_time(s.start)}–{human_time(s.end)}", styles['Body']))
         story.append(Spacer(1, 0.1*inch))
         if s.screenshot_path and os.path.exists(s.screenshot_path):
@@ -62,11 +51,15 @@ def build_pdf(out_path: str, title: str, video_url: str, sections: List[Section]
                 story.append(Spacer(1, 0.15*inch))
             except Exception:
                 pass
-        story.append(Paragraph("Summary", styles['H2']))
+        story.append(Paragraph("Summary", styles['H4']))
         story.append(Paragraph(s.summary, styles['Body']))
         if s.key_points:
             bullets = "".join([f"<li>{p}</li>" for p in s.key_points])
             story.append(Paragraph(f"<ul>{bullets}</ul>", styles['Body']))
-        if i < len(sections):
+        # Continuous flow: no page break unless explicitly requested
+        if not continuous and i < len(sections):
             story.append(PageBreak())
+        else:
+            story.append(Spacer(1, 0.4*inch))
+
     doc.build(story)
