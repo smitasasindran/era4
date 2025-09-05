@@ -49,13 +49,15 @@ def call_gemini_sections(model, transcript_text: str, max_sections: int = 8) -> 
         ]}
     ]
     resp = model.generate_content(content, safety_settings=None)
-    txt = resp.text
+    txt = resp.text.strip()
+    print(f"Raw gemini text: {txt}")
     if 'json' in txt:
         txt = txt[8:-3]
     try:
         return json.loads(txt)
-    except Exception:
+    except Exception as ex:
+        print(f"Gemini - Got exception while converting to json output. Data is: {txt}")
         m = re.search(r"\{[\s\S]*\}$", txt.strip())
         if m:
             return json.loads(m.group(0))
-    raise RuntimeError("Gemini did not return valid JSON. Raw output:\n" + txt)
+        raise RuntimeError("Gemini did not return valid JSON. Raw output:\n" + txt)
