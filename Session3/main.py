@@ -26,39 +26,41 @@ def main():
     title = info.get('title') or f"YouTube Video {video_id}"
 
     segs = fetch_transcript(video_id, lang=args.lang, use_auto=args.use_auto)
+    # print(f"Original segs: {segs}")
     transcript_text = segments_to_text(segs)
     print(f"Transcript text: {transcript_text}")
 
-    # model = init_gemini(args.model)
-    # sections_json = call_gemini_sections(model, transcript_text, max_sections=args.max_sections)
-    # raw_sections = sections_json.get('sections', [])
-    #
-    # sections = []
-    # for r in raw_sections:
-    #     s = Section(
-    #         title=str(r.get('title', '')).strip() or 'Untitled Section',
-    #         start=float(r.get('start', 0)),
-    #         end=float(r.get('end', 0)),
-    #         summary=str(r.get('summary', '')).strip(),
-    #         key_points=[re.sub(r"\s+", " ", str(p)).strip() for p in r.get('key_points', [])][:6],
-    #     )
-    #     sections.append(s)
-    #
-    # if args.screenshots:
-    #     workdir = args.workdir or tempfile.mkdtemp(prefix="yt2pdf_")
-    #     video_path = ytdlp_download_best_mp4(args.url, out_dir=os.path.join(workdir, 'video'))
-    #     shots_dir = os.path.join(workdir, 'shots')
-    #     os.makedirs(shots_dir, exist_ok=True)
-    #     for i, s in enumerate(sections, 1):
-    #         mid = max(0, (s.start + s.end) / 2.0)
-    #         shot_path = os.path.join(shots_dir, f"section_{i:02d}.jpg")
-    #         try:
-    #             ffmpeg_screenshot(video_path, mid, shot_path)
-    #             s.screenshot_path = shot_path
-    #         except Exception as e:
-    #             print(f"Failed screenshot section {i}: {e}")
-    #
-    # build_pdf(args.out, title=title, video_url=args.url, sections=sections)
+    model = init_gemini(args.model)
+    sections_json = call_gemini_sections(model, transcript_text, max_sections=args.max_sections)
+    raw_sections = sections_json.get('sections', [])
+    print(f"\n\nGemini raw sections: {raw_sections}")
+
+    sections = []
+    for r in raw_sections:
+        s = Section(
+            title=str(r.get('title', '')).strip() or 'Untitled Section',
+            start=float(r.get('start', 0)),
+            end=float(r.get('end', 0)),
+            summary=str(r.get('summary', '')).strip(),
+            key_points=[re.sub(r"\s+", " ", str(p)).strip() for p in r.get('key_points', [])][:6],
+        )
+        sections.append(s)
+
+    if args.screenshots:
+        workdir = args.workdir or tempfile.mkdtemp(prefix="yt2pdf_")
+        video_path = ytdlp_download_best_mp4(args.url, out_dir=os.path.join(workdir, 'video'))
+        shots_dir = os.path.join(workdir, 'shots')
+        os.makedirs(shots_dir, exist_ok=True)
+        for i, s in enumerate(sections, 1):
+            mid = max(0, (s.start + s.end) / 2.0)
+            shot_path = os.path.join(shots_dir, f"section_{i:02d}.jpg")
+            try:
+                ffmpeg_screenshot(video_path, mid, shot_path)
+                s.screenshot_path = shot_path
+            except Exception as e:
+                print(f"Failed screenshot section {i}: {e}")
+
+    build_pdf(args.out, title=title, video_url=args.url, sections=sections)
     print(f"Done. Wrote {args.out}")
 
 
