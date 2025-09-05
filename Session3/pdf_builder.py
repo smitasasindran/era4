@@ -4,7 +4,10 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak,
+    ListFlowable, ListItem
+)
 from PIL import Image as PILImage
 
 from utils import ensure_dir, human_time
@@ -27,6 +30,7 @@ def build_pdf(out_path: str, title: str, video_url: str, sections: List[Section]
     styles.add(ParagraphStyle(name='H2', parent=styles['Heading2'], spaceBefore=12, spaceAfter=6))
     styles.add(ParagraphStyle(name='H3', parent=styles['Heading3'], spaceBefore=8, spaceAfter=4))
     styles.add(ParagraphStyle(name='Body', parent=styles['BodyText'], leading=16))
+    styles.add(ParagraphStyle(name='CustomBullet', parent=styles['BodyText'], fontSize=9, leading=12, leftIndent=14, spaceBefore=2))
 
     story = []
     story.append(Paragraph(title, styles['TitleCenter']))
@@ -60,10 +64,13 @@ def build_pdf(out_path: str, title: str, video_url: str, sections: List[Section]
         # Summary with smaller heading
         story.append(Paragraph("Summary", styles['H3']))
         story.append(Paragraph(s.summary, styles['Body']))
+        # Proper bullet points
         if s.key_points:
-            bullets = "".join([f"<li>{p}</li>" for p in s.key_points])
-            story.append(Paragraph(f"<ul>{bullets}</ul>", styles['Body']))
-        # Add back link
+            bullet_items = [
+                ListItem(Paragraph(str(p), styles['CustomBullet'])) for p in s.key_points
+            ]
+            story.append(ListFlowable(bullet_items, bulletType='bullet', start='circle'))
+        # Back link
         story.append(Spacer(1, 0.2*inch))
         story.append(Paragraph("<a href='#toc' color='blue'>Back to Key Sections</a>", styles['Body']))
         if not continuous and i < len(sections):
