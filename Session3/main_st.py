@@ -181,8 +181,14 @@ def embed_player_with_sections(video_id: str, sections, player_width=800, player
     </html>
     """
 
-    frame_height = player_height + len(sections) * 320 + 100
-    components.html(html_doc, height=frame_height, scrolling=True)
+# Generous estimate: each section ~600px tall
+    frame_height = player_height + len(sections) * 600 + 500
+
+    components.html(
+        html_doc,
+        height=frame_height,
+        scrolling=False  # disable inner scrollbars, let Streamlit page grow
+    )
 
 
 def main():
