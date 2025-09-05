@@ -29,7 +29,8 @@ def main():
     segs = fetch_transcript(video_id, lang=args.lang, use_auto=args.use_auto)
     # print(f"Original segs: {segs}")
     transcript_text = segments_to_text(segs)
-    print(f"Transcript text: {transcript_text}")
+    # print(f"Transcript text: {transcript_text}")
+    print(f"Got transcripts from youtube video")
 
     model = init_gemini(args.model)
     sections_json = call_gemini_sections(model, transcript_text, max_sections=args.max_sections)

@@ -112,7 +112,7 @@ def call_gemini_sections(model, transcript_text: str, max_sections: int = 8) -> 
     ]
     resp = model.generate_content(content, safety_settings=None)
     txt = resp.text.strip()
-    print(f"Raw gemini text: {txt}")
+    # print(f"Raw gemini text: {txt}")
     if 'json' in txt:
         txt = txt[8:-3]
 

@@ -22,7 +22,7 @@ def ytdlp_extract(url: str) -> Dict[str, Any]:
 
 def ytdlp_get_stream_url(url: str) -> str:
     """
-    Return the direct video stream URL (best available mp4 with audio).
+    Return a direct playable video+audio stream URL (best mp4).
     Equivalent to `yt-dlp -g`.
     """
     import yt_dlp
@@ -34,7 +34,16 @@ def ytdlp_get_stream_url(url: str) -> str:
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
-        return info.get("url")
+        # Case 1: merged format (most common with -g)
+        if "url" in info and info["url"]:
+            return info["url"]
+        # Case 2: adaptive formats list
+        if "formats" in info:
+            for f in info["formats"]:
+                if f.get("ext") == "mp4" and f.get("url"):
+                    return f["url"]
+        raise RuntimeError(f"Could not resolve a direct stream URL for {url}")
+
 
 
 def ytdlp_download_best_mp4(url: str, out_dir: str) -> str:
