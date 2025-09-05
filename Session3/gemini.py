@@ -24,8 +24,9 @@ Rules:
 
 IMPORTANT INSTRUCTIONS FOR FORMATTING (READ CAREFULLY):
 1) Output an EXACTLY VALID JSON object matching the schema above. No extra commentary.
-2) Wrap that JSON in a fenced code block labeled ```json ... ```.
-3) ALSO (on its own line) output the SAME JSON encoded in BASE64 and labeled like this:
+2) In the title, summary and keypoint text fields, make sure any double quotes inside the text are escaped correctly.
+3) Wrap that JSON in a fenced code block labeled ```json ... ```.
+4) ALSO (on its own line) output the SAME JSON encoded in BASE64 and labeled like this:
 
 BASE64_JSON: <base64-encoded-json>
 
