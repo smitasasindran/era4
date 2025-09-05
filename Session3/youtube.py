@@ -45,6 +45,7 @@ def fetch_transcript(video_id: str, lang: str = 'en', use_auto: bool = False) ->
         try:
             # Try to find a manually created transcript first
             t = transcript_list.find_transcript([lang])
+            print(f"Found manually created transcript")
         except NoTranscriptFound:
             if use_auto:
                 # Fall back to auto-generated transcript
@@ -69,5 +70,7 @@ def segments_to_text(segs: List[TranscriptSegment]) -> str:
     # Keep simple lines with [mm:ss] prefix for better model grounding
     lines = []
     for s in segs:
-        lines.append(f"[{human_time(s.start)}] {s.text}")
+        cleaned_text = s.text.replace('\n', ' ')
+        # lines.append(f"[{human_time(s.start)}] {s.text}")
+        lines.append(f"[{human_time(s.start)}] {cleaned_text}")
     return "\n".join(lines)
