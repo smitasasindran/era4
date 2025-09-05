@@ -30,7 +30,7 @@ def ffmpeg_screenshot(input_source: str, ts_seconds: float, out_path: str) -> No
         "-ss", str(ts_seconds),
         "-i", input_source,
         "-frames:v", "1",
-        "-q:v", "2",
+        "-qscale:v", "2",  # high quality
         out_path,
     ]
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

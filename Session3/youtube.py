@@ -22,12 +22,13 @@ def ytdlp_extract(url: str) -> Dict[str, Any]:
 
 def ytdlp_get_stream_url(url: str) -> str:
     """
-    Return a direct playable video+audio stream URL (best mp4).
-    Equivalent to `yt-dlp -g`.
+    Return a direct video+audio stream URL, preferring >=720p progressive MP4.
+    Falls back to best if 720p not available.
     """
     import yt_dlp
     ydl_opts = {
-        'format': 'bv*[vcodec^=avc1][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best',
+        # Prefer mp4 progressive streams at >=720p, otherwise best
+        'format': "bestvideo[height>=720][ext=mp4]+bestaudio[ext=m4a]/best[height>=720][ext=mp4]/best",
         'quiet': True,
         'noplaylist': True,
         'cachedir': False,
