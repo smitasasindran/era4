@@ -9,7 +9,7 @@ from gemini import init_gemini, call_gemini_sections
 from pdf_builder import build_pdf, Section
 
 
-def run_pipeline(url, out_path, lang="en", use_auto=False, model="gemini-1.5-flash",
+def run_pipeline(url, lang="en", use_auto=False, model="gemini-1.5-flash",
                  max_sections=8, screenshots=True, screenshot_resolution=720):
 
     video_id = extract_video_id(url)
@@ -34,7 +34,7 @@ def run_pipeline(url, out_path, lang="en", use_auto=False, model="gemini-1.5-fla
         )
         sections.append(s)
 
-    if screenshots:
+    if screenshots and sections:
         workdir = tempfile.mkdtemp(prefix="yt2pdf_")
         shots_dir = os.path.join(workdir, "shots")
         os.makedirs(shots_dir, exist_ok=True)
@@ -55,8 +55,7 @@ def run_pipeline(url, out_path, lang="en", use_auto=False, model="gemini-1.5-fla
                 except Exception as e:
                     st.warning(f"Failed screenshot section {i}: {e}")
 
-    build_pdf(out_path, title=title, video_url=url, sections=sections, continuous=True)
-    return sections
+    return title, sections
 
 
 def main():
@@ -77,14 +76,16 @@ def main():
         screenshot_resolution = st.selectbox("Screenshot resolution", [360, 480, 720, 1080, 1440, 2160], index=2)
 
     if url:
-        st.video(url)
+        st.markdown("### Preview Video")
+        with st.container():
+            cols = st.columns([1, 2, 1])  # center the player
+            with cols[1]:
+                st.video(url)
 
     if st.button("▶️ Start Summarization"):
         with st.spinner("Processing..."):
-            out_path = os.path.join(tempfile.gettempdir(), "yt_summary.pdf")
-            sections = run_pipeline(
+            title, sections = run_pipeline(
                 url,
-                out_path,
                 lang=lang,
                 use_auto=use_auto,
                 model=model,
@@ -96,6 +97,9 @@ def main():
         st.success("Summarization complete!")
         st.subheader("Extracted Sections")
 
+        progress = st.progress(0)
+        total = len(sections)
+
         for i, s in enumerate(sections, 1):
             with st.container():
                 cols = st.columns([1, 2])  # left = image, right = text
@@ -104,12 +108,20 @@ def main():
                         st.image(s.screenshot_path, use_column_width=True)
                 with cols[1]:
                     st.markdown(f"### {i}. {s.title}")
-                    st.markdown(f"⏱️ {s.start:.0f}s – {s.end:.0f}s")
+                    # clickable timestamp
+                    ts_link = f"https://www.youtube.com/watch?v={extract_video_id(url)}&t={int(s.start)}s"
+                    st.markdown(f"[⏱️ {s.start:.0f}s – {s.end:.0f}s]({ts_link})")
                     st.markdown("**Summary**")
                     st.write(s.summary)
                     if s.key_points:
                         st.markdown("**Key Points**")
                         st.markdown("\n".join([f"- {p}" for p in s.key_points]))
+
+            progress.progress(i / total)
+
+        # Generate PDF after loop
+        out_path = os.path.join(tempfile.gettempdir(), "yt_summary.pdf")
+        build_pdf(out_path, title=title, video_url=url, sections=sections, continuous=True)
 
         with open(out_path, "rb") as f:
             st.download_button("📥 Download PDF", f, file_name="yt_summary.pdf", mime="application/pdf")
