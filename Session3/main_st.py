@@ -60,11 +60,10 @@ def run_pipeline(url, out_path, lang="en", use_auto=False, model="gemini-1.5-fla
 
 
 def main():
+    st.set_page_config(layout="wide")
     st.title("📺 YouTube ➜ PDF Summarizer with Gemini")
 
     url = st.text_input("Enter YouTube URL:")
-    if url:
-        st.video(url)
 
     st.subheader("Options")
     col1, col2 = st.columns(2)
@@ -76,6 +75,9 @@ def main():
         max_sections = st.number_input("Maximum sections", min_value=1, max_value=20, value=8)
         screenshots = st.checkbox("Include screenshots", value=True)
         screenshot_resolution = st.selectbox("Screenshot resolution", [360, 480, 720, 1080, 1440, 2160], index=2)
+
+    if url:
+        st.video(url)
 
     if st.button("▶️ Start Summarization"):
         with st.spinner("Processing..."):
@@ -93,16 +95,21 @@ def main():
 
         st.success("Summarization complete!")
         st.subheader("Extracted Sections")
+
         for i, s in enumerate(sections, 1):
-            st.markdown(f"### {i}. {s.title}")
-            st.markdown(f"⏱️ {s.start:.0f}s – {s.end:.0f}s")
-            if s.screenshot_path and os.path.exists(s.screenshot_path):
-                st.image(s.screenshot_path, use_column_width=True)
-            st.markdown("**Summary**")
-            st.write(s.summary)
-            if s.key_points:
-                st.markdown("**Key Points**")
-                st.markdown("\n".join([f"- {p}" for p in s.key_points]))
+            with st.container():
+                cols = st.columns([1, 2])  # left = image, right = text
+                with cols[0]:
+                    if s.screenshot_path and os.path.exists(s.screenshot_path):
+                        st.image(s.screenshot_path, use_column_width=True)
+                with cols[1]:
+                    st.markdown(f"### {i}. {s.title}")
+                    st.markdown(f"⏱️ {s.start:.0f}s – {s.end:.0f}s")
+                    st.markdown("**Summary**")
+                    st.write(s.summary)
+                    if s.key_points:
+                        st.markdown("**Key Points**")
+                        st.markdown("\n".join([f"- {p}" for p in s.key_points]))
 
         with open(out_path, "rb") as f:
             st.download_button("📥 Download PDF", f, file_name="yt_summary.pdf", mime="application/pdf")
