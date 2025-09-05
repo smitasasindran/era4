@@ -20,18 +20,21 @@ def ytdlp_extract(url: str) -> Dict[str, Any]:
         return ydl.extract_info(url, download=False)
 
 
-def ytdlp_get_stream_url(url: str) -> str:
+def ytdlp_get_stream_url(url: str, resolution: int = 720) -> str:
     """
-    Return a direct video+audio stream URL, preferring >=720p progressive MP4.
-    Falls back to best if 720p not available.
+    Return a direct video+audio stream URL, preferring >=resolution progressive MP4.
+    Falls back to best if that resolution is not available.
     """
     import yt_dlp
     ydl_opts = {
-        # Prefer mp4 progressive streams at >=720p, otherwise best
-        'format': "bestvideo[height>=720][ext=mp4]+bestaudio[ext=m4a]/best[height>=720][ext=mp4]/best",
         'quiet': True,
         'noplaylist': True,
         'cachedir': False,
+        # Prefer mp4 progressive streams at >=resolution, otherwise best
+        "format": (
+            f"bestvideo[height>={resolution}][ext=mp4]+bestaudio[ext=m4a]/"
+            f"best[height>={resolution}][ext=mp4]/best"
+        ),
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -44,7 +47,6 @@ def ytdlp_get_stream_url(url: str) -> str:
                 if f.get("ext") == "mp4" and f.get("url"):
                     return f["url"]
         raise RuntimeError(f"Could not resolve a direct stream URL for {url}")
-
 
 
 def ytdlp_download_best_mp4(url: str, out_dir: str) -> str:

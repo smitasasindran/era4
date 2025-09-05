@@ -14,10 +14,12 @@ def main():
     parser.add_argument('--url', required=True)
     parser.add_argument('--out', required=True)
     parser.add_argument('--lang', default='en')
-    parser.add_argument('--use-auto', action='store_true', default=True)
+    parser.add_argument('--use-auto', action='store_true', default=True, help="Use auto-generated transcripts")
     parser.add_argument('--model', default='gemini-1.5-flash')
     parser.add_argument('--max-sections', type=int, default=8)
     parser.add_argument('--screenshots', action='store_true', default=True)
+    parser.add_argument('--screenshot-resolution', type=int, default=720,
+                        help="Minimum vertical resolution for screenshots (e.g., 720, 1080)")
     parser.add_argument('--workdir', default=None)
     args = parser.parse_args()
 
@@ -52,7 +54,7 @@ def main():
         os.makedirs(shots_dir, exist_ok=True)
 
         try:
-            stream_url = ytdlp_get_stream_url(args.url)
+            stream_url = ytdlp_get_stream_url(args.url, resolution=args.screenshot_resolution)
         except Exception as e:
             print(f"Failed to resolve stream URL for screenshots: {e}")
             stream_url = None
