@@ -37,26 +37,10 @@ def ytdlp_download_best_mp4(url: str, out_dir: str) -> str:
         return ydl.prepare_filename(info).rsplit('.', 1)[0] + '.mp4'
 
 
-# def fetch_transcript(video_id: str, lang: str = 'en', use_auto: bool = False) -> List[TranscriptSegment]:
-#     try:
-#         if use_auto:
-#             transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-#             try:
-#                 t = transcript_list.find_transcript([lang])
-#             except NoTranscriptFound:
-#                 t = transcript_list.find_generated_transcript([lang])
-#             raw = t.fetch()
-#         else:
-#             raw = YouTubeTranscriptApi.get_transcript(video_id, languages=[lang])
-#     except (TranscriptsDisabled, NoTranscriptFound) as e:
-#         raise RuntimeError(f"No transcript available for {video_id} (lang={lang}). Try --use-auto.") from e
-#
-#     return [TranscriptSegment(start=s['start'], dur=s['duration'], text=s['text']) for s in raw]
-
-
 def fetch_transcript(video_id: str, lang: str = 'en', use_auto: bool = False) -> List[TranscriptSegment]:
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        ytt = YouTubeTranscriptApi()
+        transcript_list = ytt.list(video_id)
         t = None
         try:
             # Try to find a manually created transcript first
@@ -70,13 +54,12 @@ def fetch_transcript(video_id: str, lang: str = 'en', use_auto: bool = False) ->
                     pass
         if not t:
             raise RuntimeError(f"No transcript (manual or auto) found for {video_id} in language {lang}")
-        raw = t.fetch()
+        fetched = t.fetch()
     except (TranscriptsDisabled, NoTranscriptFound) as e:
         raise RuntimeError(f"No transcript available for {video_id} (lang={lang}).") from e
 
-    return [TranscriptSegment(start=s['start'], dur=s['duration'], text=s['text']) for s in raw]
-
-
+    # Access attributes instead of dict keys
+    return [TranscriptSegment(start=s.start, dur=s.duration, text=s.text) for s in fetched]
 
 
 # def segments_to_text(segs: List[TranscriptSegment]) -> str:
