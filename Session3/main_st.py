@@ -107,6 +107,8 @@ def embed_player_with_sections(video_id: str, sections, player_width=720, player
     """
 
     sections_html_parts = []
+    section_heights = []
+
     for idx, s in enumerate(sections, start=1):
         safe_title = html_escape.escape(s.title)
         safe_summary = html_escape.escape(s.summary).replace("\n","<br/>")
@@ -116,9 +118,14 @@ def embed_player_with_sections(video_id: str, sections, player_width=720, player
 
         ts_label = f"{human_time(s.start)} – {human_time(s.end)}"
 
+        # Embed screenshot if available
         img_src = _image_to_data_uri(getattr(s,"screenshot_path",None))
-        if not img_src:
+        img_height = 0
+        if img_src and "R0lGODlhAQAB" not in img_src:  # not the empty placeholder
+            img_height = 360  # default estimate for thumbnail height
+        else:
             img_src = "data:image/gif;base64,R0lGODlhAQABAPAAAP///wAAACH5BAAAAAAALAAAAAABAAEAAAICRAEAOw=="
+            img_height = 0
 
         section_html = f"""
         <div class="section" id="section_{idx}">
@@ -132,6 +139,12 @@ def embed_player_with_sections(video_id: str, sections, player_width=720, player
         </div>
         """
         sections_html_parts.append(section_html)
+
+        # Estimate text height: ~20px per line, assume ~3 lines per summary + 20px for bullets
+        num_lines = max(3, safe_summary.count("<br/>")+1)
+        text_height = num_lines * 20 + (len(s.key_points) * 20)
+        total_section_height = img_height + text_height + 40  # padding + margin
+        section_heights.append(total_section_height)
 
     sections_html = "\n".join(sections_html_parts)
 
@@ -167,18 +180,9 @@ def embed_player_with_sections(video_id: str, sections, player_width=720, player
     </html>
     """
 
-    # calculate frame height conservatively:
-    section_heights = []
-    for s in sections:
-        h = 400 if getattr(s,"screenshot_path",None) else 250
-        # add extra 50px for bullets and text overflow
-        h += 50
-        section_heights.append(h)
-
+    # calculate total iframe height based on actual section heights
     frame_height = player_height + sum(section_heights) + 50
-
     components.html(html_doc, height=frame_height, scrolling=False)
-
 
 
 def main():
