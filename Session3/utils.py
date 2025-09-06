@@ -31,6 +31,7 @@ def ffmpeg_screenshot(input_source: str, ts_seconds: float, out_path: str) -> No
         "-i", input_source,
         "-frames:v", "1",
         "-qscale:v", "2",  # high quality
+        "-an", # disable audio processing
         out_path,
     ]
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

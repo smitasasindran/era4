@@ -22,31 +22,52 @@ def ytdlp_extract(url: str) -> Dict[str, Any]:
 
 def ytdlp_get_stream_url(url: str, resolution: int = 720) -> str:
     """
-    Return a direct video+audio stream URL, preferring >=resolution progressive MP4.
-    Falls back to best if that resolution is not available.
+    Return the highest resolution progressive MP4 video+audio stream URL
+    available, preferring >=min_resolution.
     """
     import yt_dlp
+
     ydl_opts = {
         'quiet': True,
         'noplaylist': True,
         'cachedir': False,
-        # Prefer mp4 progressive streams at >=resolution, otherwise best
-        "format": (
-            f"bestvideo[height>={resolution}][ext=mp4]+bestaudio[ext=m4a]/"
-            f"best[height>={resolution}][ext=mp4]/best"
-        ),
+        'format': 'bestvideo+bestaudio/best',
     }
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
-        # Case 1: merged format (most common with -g)
-        if "url" in info and info["url"]:
+
+        formats = info.get("formats", [])
+
+        # Filter for progressive mp4 formats with video and audio
+        progressive_formats = [
+            f for f in formats
+            if f.get("ext") == "mp4"
+            # and f.get("height") is not None
+            # and f.get("url")
+            # and not f.get("vcodec", "").startswith("none")  # ensure it has video
+            # and not f.get("acodec", "").startswith("none")  # ensure it has audio
+        ]
+
+        # Sort descending by resolution (height)
+        progressive_formats.sort(key=lambda f: f["height"], reverse=True)
+
+        # Pick the first that meets min_resolution
+        for f in progressive_formats:
+            if f["height"] >= resolution or f["width"] >= resolution:
+                print(f"Got format >= min_res")
+                return f["url"]
+
+        # Fallback: just return the highest available progressive format
+        if progressive_formats:
+            print(f"Returning highest available progressive youtube format")
+            return progressive_formats[0]["url"]
+
+        # As a last resort, fall back to the best format URL (may be adaptive)
+        if "url" in info:
             return info["url"]
-        # Case 2: adaptive formats list
-        if "formats" in info:
-            for f in info["formats"]:
-                if f.get("ext") == "mp4" and f.get("url"):
-                    return f["url"]
-        raise RuntimeError(f"Could not resolve a direct stream URL for {url}")
+
+        raise RuntimeError(f"Could not resolve a suitable stream URL for {url}")
 
 
 def ytdlp_download_best_mp4(url: str, out_dir: str) -> str:

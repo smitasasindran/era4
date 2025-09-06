@@ -3,7 +3,7 @@ import re
 import tempfile
 import argparse
 
-from utils import extract_video_id, ffmpeg_screenshot, human_time
+from utils import extract_video_id, ffmpeg_screenshot, human_time, parse_timecode, normalize_timecode
 from youtube import ytdlp_extract, ytdlp_get_stream_url, fetch_transcript, segments_to_text
 from gemini import init_gemini, call_gemini_sections
 from pdf_builder import build_pdf, Section
@@ -40,11 +40,13 @@ def main():
     sections = []
     for r in raw_sections:
         s = Section(
-            title=str(r.get('title', '')).strip() or 'Untitled Section',
-            start=float(r.get('start', 0)),
-            end=float(r.get('end', 0)),
-            summary=str(r.get('summary', '')).strip(),
-            key_points=[re.sub(r"\s+", " ", str(p)).strip() for p in r.get('key_points', [])][:6],
+            title=str(r.get("title", "")).strip() or "Untitled Section",
+            start=parse_timecode(r.get("start", 0)),
+            end=parse_timecode(r.get("end", 0)),
+            summary=str(r.get("summary", "")).strip(),
+            key_points=[re.sub(r"\s+", " ", str(p)).strip() for p in r.get("key_points", [])][:6],
+            raw_start=normalize_timecode(r.get("start", "")),  # store human-readable
+            raw_end=normalize_timecode(r.get("end", ""))
         )
         sections.append(s)
 
