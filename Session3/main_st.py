@@ -68,7 +68,7 @@ def run_pipeline(url, lang="en", use_auto=False, model="gemini-1.5-flash",
                 except Exception as e:
                     st.warning(f"Failed screenshot section {i}: {e}")
 
-    return title, sections, video_id
+    return title, sections, video_id, segs
 
 
 def _image_to_data_uri(path: str) -> str:
@@ -90,6 +90,7 @@ def _image_to_data_uri(path: str) -> str:
         return f"data:{mime};base64,{b64}"
     except Exception:
         return ""
+
 
 def embed_player_with_sections(video_id: str, sections, player_width=720, player_height=405):
     style = """
@@ -193,7 +194,9 @@ def main():
     if "url" not in st.session_state:
         st.session_state.url = ""
     st.markdown("#### Enter YouTube URL:")
-    st.session_state.url = st.text_input("", value=st.session_state.url)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c1:
+        st.session_state.url = st.text_input("", value=st.session_state.url)
 
     # --- Parameters ---
     st.markdown("#### Parameters:")
@@ -229,7 +232,7 @@ def main():
     # --- Run summarization ---
     if start_btn and st.session_state.url:
         with st.spinner("Processing..."):
-            title, sections, video_id = run_pipeline(
+            title, sections, video_id, transcript_text = run_pipeline(
                 st.session_state.url,
                 max_sections=st.session_state.max_sections,
                 screenshots=st.session_state.screenshots,
@@ -239,16 +242,20 @@ def main():
             st.session_state.title = title
             st.session_state.sections = sections
             st.session_state.video_id = video_id
+            st.session_state.transcript_text = transcript_text
             st.success("Summarization complete!")
 
     # --- Render player + sections if available ---
+    # if "sections" in st.session_state and st.session_state.sections:
     if "sections" in st.session_state and "video_id" in st.session_state:
-        embed_player_with_sections(
-            st.session_state.video_id,
-            st.session_state.sections,
-            player_width=720,
-            player_height=405
-        )
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            embed_player_with_sections(
+                st.session_state.video_id,
+                st.session_state.sections,
+                player_width = 720,
+                player_height=405
+            )
 
         # Generate PDF once and store path
         if "pdf_path" not in st.session_state:
@@ -263,15 +270,14 @@ def main():
             st.session_state.pdf_path = out_path
             st.info(f"✅ PDF successfully generated at: `{out_path}`")
 
-        # --- Download button ---
         with open(st.session_state.pdf_path, "rb") as f:
             pdf_placeholder.download_button(
                 "📥 Download PDF",
                 f,
-                file_name="yt_summary.pdf",
+                # file_name = "yt_summary.pdf",
+                file_name=f"{st.session_state.title}.pdf",
                 mime="application/pdf"
             )
-
 
 if __name__ == "__main__":
     main()
