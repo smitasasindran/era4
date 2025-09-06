@@ -91,57 +91,44 @@ def _image_to_data_uri(path: str) -> str:
     except Exception:
         return ""
 
-
-def embed_player_with_sections(video_id: str, sections, player_width=800, player_height=450):
-    """
-    Render a single components.html containing the YouTube player and a list of sections
-    so that timestamps call seek(seconds) in the same iframe.
-    (This approach avoids cross-frame postMessage issues.)
-    """
-
+def embed_player_with_sections(video_id: str, sections, player_width=720, player_height=405):
     style = """
     <style>
       body { font-family: Arial, Helvetica, sans-serif; margin: 10px; color: #222; }
       .player-wrap { text-align: center; margin-bottom: 20px; }
       .sections { display:flex; flex-direction: column; gap: 20px; }
-      .section { display:flex; gap:20px; align-items:flex-start; padding:16px; border-radius:10px; border: 1px solid #ddd; background: #fdfdfd; }
-      .thumb { width: 60%; max-width: 700px; border-radius:8px; object-fit: contain; background:#f5f5f5; }
-      .meta { flex: 1; min-width: 0; max-width: 40%; }
-      .meta h3 { margin: 0 0 8px 0; font-size: 18px; }
-      .meta .ts { color:#0b5ed7; font-weight:600; margin-bottom:8px; display:inline-block; }
-      .meta p { margin: 6px 0; line-height: 1.4; }
-      .meta ul { margin: 6px 0 0 18px; }
-      a.ts-link { color: #0b5ed7; text-decoration: none; font-weight: 600; }
-      a.ts-link:hover { text-decoration: underline; cursor: pointer; }
+      .section { display:flex; gap:20px; align-items:flex-start; padding:16px; border-radius:10px; border:1px solid #ddd; background:#fdfdfd; }
+      .thumb { width:60%; max-width:700px; border-radius:8px; object-fit:contain; background:#f5f5f5; }
+      .meta { flex:1; min-width:0; max-width:40%; }
+      a.ts-link { color:#0b5ed7; text-decoration:none; font-weight:600; }
+      a.ts-link:hover { text-decoration:underline; cursor:pointer; }
+      ul { margin:6px 0 0 18px; }
     </style>
     """
 
     sections_html_parts = []
     for idx, s in enumerate(sections, start=1):
         safe_title = html_escape.escape(s.title)
-        safe_summary = html_escape.escape(s.summary).replace("\n", "<br/>")
+        safe_summary = html_escape.escape(s.summary).replace("\n","<br/>")
         bullets_html = ""
         if s.key_points:
-            bullets_html = "<ul>" + "".join(
-                f"<li>{html_escape.escape(str(p))}</li>" for p in s.key_points
-            ) + "</ul>"
-            # bullets_html = "<ul>" + "".join(f"<li>{html_escape.escape(str(p))}</li>" for p in s.key_points) + "</ul>"
+            bullets_html = "<ul>" + "".join(f"<li>{html_escape.escape(str(p))}</li>" for p in s.key_points) + "</ul>"
 
-        ts_label = f"{human_time(s.start)} – {human_time(s.end)}  [{s.start}-{s.end}]"
+        ts_label = f"{human_time(s.start)} – {human_time(s.end)}"
 
-        img_src = _image_to_data_uri(getattr(s, "screenshot_path", None))
+        img_src = _image_to_data_uri(getattr(s,"screenshot_path",None))
         if not img_src:
             img_src = "data:image/gif;base64,R0lGODlhAQABAPAAAP///wAAACH5BAAAAAAALAAAAAABAAEAAAICRAEAOw=="
 
         section_html = f"""
         <div class="section" id="section_{idx}">
-          <img class="thumb" src="{img_src}" alt="screenshot_{idx}" />
-          <div class="meta">
-            <h3>{idx}. {safe_title}</h3>
-            <div><a class="ts-link" href="#" onclick="seek({int(s.start)}); return false;">⏱️ {ts_label}</a></div>
-            <p>{safe_summary}</p>
-            {bullets_html}
-          </div>
+            <img class="thumb" src="{img_src}" alt="screenshot_{idx}" />
+            <div class="meta">
+                <strong>{idx}. {safe_title}</strong><br/>
+                <a class="ts-link" href="#" onclick="seek({int(s.start)}); return false;">⏱️ {ts_label}</a>
+                <p>{safe_summary}</p>
+                {bullets_html}
+            </div>
         </div>
         """
         sections_html_parts.append(section_html)
@@ -156,41 +143,42 @@ def embed_player_with_sections(video_id: str, sections, player_width=800, player
       {style}
     </head>
     <body>
-      <div class="player-wrap">
-        <div id="player"></div>
-      </div>
-
-      <div class="sections">
-        {sections_html}
-      </div>
+      <div class="player-wrap"><div id="player"></div></div>
+      <div class="sections">{sections_html}</div>
 
       <script src="https://www.youtube.com/iframe_api"></script>
       <script>
         var player = null;
         function onYouTubeIframeAPIReady() {{
-          player = new YT.Player('player', {{
-            height: '{player_height}',
-            width: '{player_width}',
-            videoId: '{video_id}',
-            playerVars: {{ 'playsinline': 1 }}
-          }});
+            player = new YT.Player('player', {{
+                height: '{player_height}',
+                width: '{player_width}',
+                videoId: '{video_id}',
+                playerVars: {{ 'playsinline':1 }}
+            }});
         }}
         function seek(seconds) {{
-          if (player && player.seekTo) {{
-            try {{
-              player.seekTo(seconds, true);
-              player.playVideo();
-            }} catch (e) {{ console.error('seek failed', e); }}
-          }}
+            if(player && player.seekTo){{
+                try{{player.seekTo(seconds,true); player.playVideo();}}catch(e){{console.error(e);}}
+            }}
         }}
       </script>
     </body>
     </html>
     """
 
-    # generous height so the iframe is embedded full-length (no inner scrollbar)
-    frame_height = player_height + len(sections) * 300 + 200
+    # calculate frame height conservatively:
+    section_heights = []
+    for s in sections:
+        h = 400 if getattr(s,"screenshot_path",None) else 250
+        # add extra 50px for bullets and text overflow
+        h += 50
+        section_heights.append(h)
+
+    frame_height = player_height + sum(section_heights) + 50
+
     components.html(html_doc, height=frame_height, scrolling=False)
+
 
 
 def main():
@@ -203,10 +191,8 @@ def main():
         # st.subheader("Enter Youtube URL")
         st.markdown("#### Enter YouTube URL:")
         url = st.text_input("")
-    # with c2:
 
-    # Options (remove Gemini model & transcript language per request)
-    # st.subheader("Options")
+    # Options
     st.markdown("#### Parameters:")
     col1, col2, col3, col4 = st.columns([0.7, 0.5, 1, 4])
     with col1:
@@ -215,7 +201,6 @@ def main():
         screenshot_resolution = st.selectbox("Screenshot resolution", [360, 480, 720, 1080, 1440, 2160], index=2)
     with col3:
         screenshots = st.checkbox("Include screenshots", value=True)
-
 
     # Action row: Start Summarization + (disabled) Download PDF next to it
     st.markdown("#### Actions: ")

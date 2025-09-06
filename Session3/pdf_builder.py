@@ -13,13 +13,15 @@ from PIL import Image as PILImage
 from utils import ensure_dir, human_time
 
 class Section:
-    def __init__(self, title, start, end, summary, key_points, screenshot_path=None):
+    def __init__(self, title, start, end, summary, key_points, screenshot_path=None, raw_start="[00:00]", raw_end="[00:00]"):
         self.title = title
         self.start = start
         self.end = end
         self.summary = summary
         self.key_points = key_points
         self.screenshot_path = screenshot_path
+        self.raw_start = raw_start
+        self.raw_end = raw_end
 
 
 def build_pdf(out_path: str, title: str, video_url: str, sections: List[Section], page_size=A4, continuous=False):
