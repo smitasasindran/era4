@@ -189,56 +189,88 @@ def main():
     st.set_page_config(layout="wide")
     st.title("📺 YouTube ➜ PDF Summarizer with Gemini")
 
-    # centered, smaller URL input (so it doesn't span entire width)
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c1:
-        # st.subheader("Enter Youtube URL")
-        st.markdown("#### Enter YouTube URL:")
-        url = st.text_input("")
+    # --- URL input ---
+    if "url" not in st.session_state:
+        st.session_state.url = ""
+    st.markdown("#### Enter YouTube URL:")
+    st.session_state.url = st.text_input("", value=st.session_state.url)
 
-    # Options
+    # --- Parameters ---
     st.markdown("#### Parameters:")
     col1, col2, col3, col4 = st.columns([0.7, 0.5, 1, 4])
-    with col1:
-        max_sections = st.number_input("Maximum sections", min_value=1, max_value=20, value=8)
-    with col2:
-        screenshot_resolution = st.selectbox("Screenshot resolution", [360, 480, 720, 1080, 1440, 2160], index=2)
-    with col3:
-        screenshots = st.checkbox("Include screenshots", value=True)
 
-    # Action row: Start Summarization + (disabled) Download PDF next to it
-    st.markdown("#### Actions: ")
+    if "max_sections" not in st.session_state:
+        st.session_state.max_sections = 8
+    with col1:
+        st.session_state.max_sections = st.number_input(
+            "Maximum sections", min_value=1, max_value=20, value=st.session_state.max_sections
+        )
+
+    if "screenshot_resolution" not in st.session_state:
+        st.session_state.screenshot_resolution = 720
+    with col2:
+        st.session_state.screenshot_resolution = st.selectbox(
+            "Screenshot resolution",
+            [360, 480, 720, 1080, 1440, 2160],
+            index=[360, 480, 720, 1080, 1440, 2160].index(st.session_state.screenshot_resolution)
+        )
+
+    if "screenshots" not in st.session_state:
+        st.session_state.screenshots = True
+    with col3:
+        st.session_state.screenshots = st.checkbox("Include screenshots", value=st.session_state.screenshots)
+
+    # --- Actions: Start / Download ---
+    st.markdown("#### Actions:")
     action_col1, action_col2, _ = st.columns([1, 1, 6])
     start_btn = action_col1.button("▶️ Start Summarization")
-    # placeholder for download button next to Start; initially disabled
     pdf_placeholder = action_col2.empty()
-    pdf_placeholder.button("📥 Download PDF", disabled=True)
 
-    if start_btn and url:
+    # --- Run summarization ---
+    if start_btn and st.session_state.url:
         with st.spinner("Processing..."):
-            # call pipeline (lang & model use defaults inside run_pipeline)
             title, sections, video_id = run_pipeline(
-                url,
-                max_sections=max_sections,
-                screenshots=screenshots,
-                screenshot_resolution=screenshot_resolution,
+                st.session_state.url,
+                max_sections=st.session_state.max_sections,
+                screenshots=st.session_state.screenshots,
+                screenshot_resolution=st.session_state.screenshot_resolution,
             )
+            # Save results in session_state
+            st.session_state.title = title
+            st.session_state.sections = sections
+            st.session_state.video_id = video_id
+            st.success("Summarization complete!")
 
-        st.success("Summarization complete!")
+    # --- Render player + sections if available ---
+    if "sections" in st.session_state and "video_id" in st.session_state:
+        embed_player_with_sections(
+            st.session_state.video_id,
+            st.session_state.sections,
+            player_width=720,
+            player_height=405
+        )
 
-        # Render player + sections (player + sections live inside the same iframe)
-        embed_player_with_sections(video_id, sections, player_width=720, player_height=405)
+        # Generate PDF once and store path
+        if "pdf_path" not in st.session_state:
+            out_path = os.path.join(tempfile.gettempdir(), "yt_summary.pdf")
+            build_pdf(
+                out_path,
+                title=st.session_state.title,
+                video_url=st.session_state.url,
+                sections=st.session_state.sections,
+                continuous=True
+            )
+            st.session_state.pdf_path = out_path
+            st.info(f"✅ PDF successfully generated at: `{out_path}`")
 
-        # Generate PDF
-        out_path = os.path.join(tempfile.gettempdir(), "yt_summary.pdf")
-        build_pdf(out_path, title=title, video_url=url, sections=sections, continuous=True)
-
-        # confirmation message with path
-        st.info(f"✅ PDF successfully generated at: `{out_path}`")
-
-        # replace disabled placeholder with actual download button
-        with open(out_path, "rb") as f:
-            pdf_placeholder.download_button("📥 Download PDF", f, file_name="yt_summary.pdf", mime="application/pdf")
+        # --- Download button ---
+        with open(st.session_state.pdf_path, "rb") as f:
+            pdf_placeholder.download_button(
+                "📥 Download PDF",
+                f,
+                file_name="yt_summary.pdf",
+                mime="application/pdf"
+            )
 
 
 if __name__ == "__main__":
