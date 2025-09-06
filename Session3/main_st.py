@@ -25,7 +25,8 @@ def run_pipeline(url, lang="en", use_auto=False, model="gemini-1.5-flash",
     print(f"Getting transcripts")
     segs = fetch_transcript(video_id, lang=lang, use_auto=use_auto)
     transcript_text = segments_to_text(segs)
-    print(f"Got transcriots for video")
+    print(f"Got transcripts for video")
+    # print(transcript_text)
 
     model_obj = init_gemini(model)
     sections_json = call_gemini_sections(model_obj, transcript_text, max_sections=max_sections)
@@ -90,8 +91,11 @@ def _image_to_data_uri(path: str) -> str:
 
 def embed_player_with_sections(video_id: str, sections, player_width=800, player_height=450):
     """
-    Render a components.html block containing the YouTube player and a list of sections.
+    Render a single components.html containing the YouTube player and a list of sections
+    so that timestamps call seek(seconds) in the same iframe.
+    (This approach avoids cross-frame postMessage issues.)
     """
+
     style = """
     <style>
       body { font-family: Arial, Helvetica, sans-serif; margin: 10px; color: #222; }
@@ -109,6 +113,24 @@ def embed_player_with_sections(video_id: str, sections, player_width=800, player
     </style>
     """
 
+
+    # style = """
+    # <style>
+    #   body { font-family: Arial, Helvetica, sans-serif; margin: 10px; color: #222; }
+    #   .player-wrap { text-align: center; margin-bottom: 12px; }
+    #   .sections { display:flex; flex-direction: column; gap: 12px; }
+    #   .section { display:flex; gap:12px; align-items:flex-start; padding:12px; border-radius:8px; border: 1px solid #eee; background: #fafafa; }
+    #   .thumb { width: 60%; max-width: 700px; border-radius:6px; object-fit: contain; }
+    #   .meta { flex: 1; min-width: 0; max-width: 40%; }
+    #   .meta h3 { margin: 0 0 6px 0; font-size: 16px; }
+    #   .meta .ts { color:#0b5ed7; text-decoration:none; font-weight:600; margin-bottom:6px; display:inline-block; }
+    #   .meta p { margin: 6px 0; line-height: 1.4; }
+    #   .meta ul { margin: 6px 0 0 18px; }
+    #   a.ts-link { color: #0b5ed7; text-decoration: none; font-weight: 600; }
+    #   a.ts-link:hover { text-decoration: underline; cursor: pointer; }
+    # </style>
+    # """
+
     sections_html_parts = []
     for idx, s in enumerate(sections, start=1):
         safe_title = html_escape.escape(s.title)
@@ -118,22 +140,20 @@ def embed_player_with_sections(video_id: str, sections, player_width=800, player
             bullets_html = "<ul>" + "".join(
                 f"<li>{html_escape.escape(str(p))}</li>" for p in s.key_points
             ) + "</ul>"
+            # bullets_html = "<ul>" + "".join(f"<li>{html_escape.escape(str(p))}</li>" for p in s.key_points) + "</ul>"
 
-        ts_label = f"{human_time(s.start)} – {human_time(s.end)}"
+        ts_label = f"{human_time(s.start)} – {human_time(s.end)}  [{s.start}-{s.end}]"
 
-        # Thumbnail or placeholder
-        if getattr(s, "screenshot_path", None) and os.path.exists(s.screenshot_path):
-            img_src = _image_to_data_uri(s.screenshot_path)
-            thumb_html = f'<img class="thumb" src="{img_src}" alt="screenshot_{idx}" />'
-        else:
-            thumb_html = '<div class="thumb" style="height:200px; background:#fafafa; display:flex; align-items:center; justify-content:center; color:#aaa; font-size:14px;">No Screenshot</div>'
+        img_src = _image_to_data_uri(getattr(s, "screenshot_path", None))
+        if not img_src:
+            img_src = "data:image/gif;base64,R0lGODlhAQABAPAAAP///wAAACH5BAAAAAAALAAAAAABAAEAAAICRAEAOw=="
 
         section_html = f"""
         <div class="section" id="section_{idx}">
-          {thumb_html}
+          <img class="thumb" src="{img_src}" alt="screenshot_{idx}" />
           <div class="meta">
             <h3>{idx}. {safe_title}</h3>
-            <div><a class="ts-link" onclick="seek({int(s.start)}); return false;">⏱️ {ts_label}</a></div>
+            <div><a class="ts-link" href="#" onclick="seek({int(s.start)}); return false;">⏱️ {ts_label}</a></div>
             <p>{safe_summary}</p>
             {bullets_html}
           </div>
@@ -172,8 +192,10 @@ def embed_player_with_sections(video_id: str, sections, player_width=800, player
         }}
         function seek(seconds) {{
           if (player && player.seekTo) {{
-            player.seekTo(seconds, true);
-            player.playVideo();
+            try {{
+              player.seekTo(seconds, true);
+              player.playVideo();
+            }} catch (e) {{ console.error('seek failed', e); }}
           }}
         }}
       </script>
@@ -181,50 +203,71 @@ def embed_player_with_sections(video_id: str, sections, player_width=800, player
     </html>
     """
 
-# Generous estimate: each section ~600px tall
-    frame_height = player_height + len(sections) * 600 + 500
-
-    components.html(
-        html_doc,
-        height=frame_height,
-        scrolling=False  # disable inner scrollbars, let Streamlit page grow
-    )
+    # generous height so the iframe is embedded full-length (no inner scrollbar)
+    frame_height = player_height + len(sections) * 300 + 200
+    components.html(html_doc, height=frame_height, scrolling=False)
 
 
 def main():
     st.set_page_config(layout="wide")
     st.title("📺 YouTube ➜ PDF Summarizer with Gemini")
 
-    url = st.text_input("Enter YouTube URL:")
+    # # Custom CSS for bigger radio-like buttons, to globally reduce container widths
+    # st.markdown(
+    #     """
+    #     <style>
+    #     div[data-baseweb="radio"] > div {
+    #         flex-direction: row !important;
+    #         justify-content: center;
+    #     }
+    #     div[data-baseweb="radio"] label {
+    #         font-size: 18px !important;
+    #         font-weight: 600 !important;
+    #         margin-right: 2rem;
+    #     }
+    #     .stSelectbox, .stRadio, .stSlider, .stExpander, .stTextInput, .stFileUploader {
+    #         max-width: 600px;     /* set desired width */
+    #         //margin: auto;       /* center align, uncomment if needed */
+    #     }
+    #     </style>
+    #     """,
+    #     unsafe_allow_html=True
+    # )
 
-    st.subheader("Options")
-    col1, col2 = st.columns(2)
+
+    # centered, smaller URL input (so it doesn't span entire width)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c1:
+        # st.subheader("Enter Youtube URL")
+        st.markdown("#### Enter YouTube URL:")
+        url = st.text_input("")
+    # with c2:
+
+    # Options (remove Gemini model & transcript language per request)
+    # st.subheader("Options")
+    st.markdown("#### Parameters:")
+    col1, col2, col3, col4 = st.columns([0.7, 0.5, 1, 4])
     with col1:
-        lang = st.text_input("Transcript language (default 'en')", value="en")
-        use_auto = st.checkbox("Use auto-generated transcript if manual not available", value=False)
-        model = st.text_input("Gemini model", value="gemini-1.5-flash")
-    with col2:
         max_sections = st.number_input("Maximum sections", min_value=1, max_value=20, value=8)
-        screenshots = st.checkbox("Include screenshots", value=True)
+    with col2:
         screenshot_resolution = st.selectbox("Screenshot resolution", [360, 480, 720, 1080, 1440, 2160], index=2)
+    with col3:
+        screenshots = st.checkbox("Include screenshots", value=True)
 
-    # # Preview (small centered player) — optional, but keep it minimal
-    # if url:
-    #     with st.container():
-    #         cols = st.columns([1, 2, 1])
-    #         with cols[1]:
-    #             # small preview using the iframe API too so it looks consistent
-    #             vid = extract_video_id(url)
-    #             # Use embed_player_with_sections with zero sections for preview (no sections displayed)
-    #             embed_player_with_sections(vid, [], player_width=560, player_height=315)
 
-    if st.button("▶️ Start Summarization"):
+    # Action row: Start Summarization + (disabled) Download PDF next to it
+    st.markdown("#### Actions: ")
+    action_col1, action_col2, _ = st.columns([1, 1, 6])
+    start_btn = action_col1.button("▶️ Start Summarization")
+    # placeholder for download button next to Start; initially disabled
+    pdf_placeholder = action_col2.empty()
+    pdf_placeholder.button("📥 Download PDF", disabled=True)
+
+    if start_btn and url:
         with st.spinner("Processing..."):
+            # call pipeline (lang & model use defaults inside run_pipeline)
             title, sections, video_id = run_pipeline(
                 url,
-                lang=lang,
-                use_auto=use_auto,
-                model=model,
                 max_sections=max_sections,
                 screenshots=screenshots,
                 screenshot_resolution=screenshot_resolution,
@@ -232,15 +275,16 @@ def main():
 
         st.success("Summarization complete!")
 
-        # Render player + sections inside same iframe so timestamps seek inline
+        # Render player + sections (player + sections live inside the same iframe)
         embed_player_with_sections(video_id, sections, player_width=720, player_height=405)
 
-        # Generate PDF after loop
+        # Generate PDF
         out_path = os.path.join(tempfile.gettempdir(), "yt_summary.pdf")
         build_pdf(out_path, title=title, video_url=url, sections=sections, continuous=True)
 
+        # replace disabled placeholder with actual download button
         with open(out_path, "rb") as f:
-            st.download_button("📥 Download PDF", f, file_name="yt_summary.pdf", mime="application/pdf")
+            pdf_placeholder.download_button("📥 Download PDF", f, file_name="yt_summary.pdf", mime="application/pdf")
 
 
 if __name__ == "__main__":
