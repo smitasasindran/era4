@@ -5,6 +5,8 @@ import base64
 from typing import Dict, Any
 import google.generativeai as genai
 
+#(always use zero padding, e.g. [01:05], [00:45:12])
+
 SECTION_SCHEMA_INSTRUCTIONS = (
     """
 You are given a YouTube transcript with timestamps like [mm:ss] or [hh:mm:ss].
@@ -12,18 +14,27 @@ Extract the MOST IMPORTANT sections of the video in JSON only, no commentary.
 Return up to {max_sections} sections.
 Each section must be a JSON object with fields:
   - title: short, descriptive (<= 60 chars)
-  - start: start time in SECONDS (number)
-  - end: end time in SECONDS (number)
+  - start: section start time in [mm:ss] or [hh:mm:ss] format
+  - end: section end time in the same format as start time
   - summary: 2-4 sentence summary
   - key_points: array of 3-6 crisp bullet points
-Rules:
+
+STRICT RULES FOR TIMESTAMP FORMATTING:
+  - If the transcript timecodes are under 1 hour, you MUST output in [mm:ss] format only. 
+  - If the transcript explicitly contains hours, use [hh:mm:ss].
+  - Never expand [mm:ss] into [hh:mm:ss] unless the transcript truly has an hours field.
+  - Always zero-pad minutes and seconds to 2 digits (e.g. [00:05], [01:09], [12:45]).
+  - Hours (if present) must also be zero-padded to 2 digits (e.g. [01:02:03]).
+  
+Other rules:
   - Always align start/end to the closest spoken-word boundaries you can detect from timestamps.
   - Ensure sections are non-overlapping and ordered by start.
   - Prefer moments where the speaker introduces a topic, demo, definition, or conclusion.
   - If the transcript is partial, still produce your best structured output.
+  - Always return "start" and "end" in string format, not as plain integers.
 
 IMPORTANT INSTRUCTIONS FOR FORMATTING (READ CAREFULLY):
-1) Output an EXACTLY VALID JSON object matching the schema above. No extra commentary.
+1) Output an EXACTLY VALID JSON object matching the schema above. No extra commentary or explanations.
 2) In the title, summary and keypoint text fields, make sure any double quotes inside the text are escaped correctly.
 3) Wrap that JSON in a fenced code block labeled ```json ... ```.
 4) ALSO (on its own line) output the SAME JSON encoded in BASE64 and labeled like this:
@@ -43,6 +54,9 @@ BASE64_JSON: <base64>
 If you cannot follow the exact formatting, reply with ONLY the JSON inside the fenced block and nothing else.
     """
 )
+
+#     {{"title":"Intro","start":"[00:00]","end":"[00:45]","summary":"...","key_points":["...","..."]}}
+
 
 
 def init_gemini(model_name: str, api_key: str = None):

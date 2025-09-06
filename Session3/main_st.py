@@ -6,7 +6,7 @@ import tempfile
 import streamlit as st
 import streamlit.components.v1 as components
 
-from utils import extract_video_id, ffmpeg_screenshot, human_time
+from utils import extract_video_id, ffmpeg_screenshot, human_time, parse_timecode, normalize_timecode
 from youtube import ytdlp_extract, ytdlp_get_stream_url, fetch_transcript, segments_to_text
 from gemini import init_gemini, call_gemini_sections
 from pdf_builder import build_pdf, Section
@@ -26,21 +26,24 @@ def run_pipeline(url, lang="en", use_auto=False, model="gemini-1.5-flash",
     segs = fetch_transcript(video_id, lang=lang, use_auto=use_auto)
     transcript_text = segments_to_text(segs)
     print(f"Got transcripts for video")
-    # print(transcript_text)
+    print(transcript_text)
 
     model_obj = init_gemini(model)
     sections_json = call_gemini_sections(model_obj, transcript_text, max_sections=max_sections)
     print(f"Got section summary from Gemini")
     raw_sections = sections_json.get("sections", [])
+    print(f"Gemini sections: {raw_sections}")
 
     sections = []
     for r in raw_sections:
         s = Section(
             title=str(r.get("title", "")).strip() or "Untitled Section",
-            start=float(r.get("start", 0)),
-            end=float(r.get("end", 0)),
+            start=parse_timecode(r.get("start", 0)),
+            end=parse_timecode(r.get("end", 0)),
             summary=str(r.get("summary", "")).strip(),
             key_points=[re.sub(r"\s+", " ", str(p)).strip() for p in r.get("key_points", [])][:6],
+            raw_start=normalize_timecode(r.get("start", "")),  # store human-readable
+            raw_end=normalize_timecode(r.get("end", ""))
         )
         sections.append(s)
 
@@ -112,24 +115,6 @@ def embed_player_with_sections(video_id: str, sections, player_width=800, player
       a.ts-link:hover { text-decoration: underline; cursor: pointer; }
     </style>
     """
-
-
-    # style = """
-    # <style>
-    #   body { font-family: Arial, Helvetica, sans-serif; margin: 10px; color: #222; }
-    #   .player-wrap { text-align: center; margin-bottom: 12px; }
-    #   .sections { display:flex; flex-direction: column; gap: 12px; }
-    #   .section { display:flex; gap:12px; align-items:flex-start; padding:12px; border-radius:8px; border: 1px solid #eee; background: #fafafa; }
-    #   .thumb { width: 60%; max-width: 700px; border-radius:6px; object-fit: contain; }
-    #   .meta { flex: 1; min-width: 0; max-width: 40%; }
-    #   .meta h3 { margin: 0 0 6px 0; font-size: 16px; }
-    #   .meta .ts { color:#0b5ed7; text-decoration:none; font-weight:600; margin-bottom:6px; display:inline-block; }
-    #   .meta p { margin: 6px 0; line-height: 1.4; }
-    #   .meta ul { margin: 6px 0 0 18px; }
-    #   a.ts-link { color: #0b5ed7; text-decoration: none; font-weight: 600; }
-    #   a.ts-link:hover { text-decoration: underline; cursor: pointer; }
-    # </style>
-    # """
 
     sections_html_parts = []
     for idx, s in enumerate(sections, start=1):
