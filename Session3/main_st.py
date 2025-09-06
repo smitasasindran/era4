@@ -212,29 +212,6 @@ def main():
     st.set_page_config(layout="wide")
     st.title("📺 YouTube ➜ PDF Summarizer with Gemini")
 
-    # # Custom CSS for bigger radio-like buttons, to globally reduce container widths
-    # st.markdown(
-    #     """
-    #     <style>
-    #     div[data-baseweb="radio"] > div {
-    #         flex-direction: row !important;
-    #         justify-content: center;
-    #     }
-    #     div[data-baseweb="radio"] label {
-    #         font-size: 18px !important;
-    #         font-weight: 600 !important;
-    #         margin-right: 2rem;
-    #     }
-    #     .stSelectbox, .stRadio, .stSlider, .stExpander, .stTextInput, .stFileUploader {
-    #         max-width: 600px;     /* set desired width */
-    #         //margin: auto;       /* center align, uncomment if needed */
-    #     }
-    #     </style>
-    #     """,
-    #     unsafe_allow_html=True
-    # )
-
-
     # centered, smaller URL input (so it doesn't span entire width)
     c1, c2, c3 = st.columns([1, 2, 1])
     with c1:
@@ -281,6 +258,9 @@ def main():
         # Generate PDF
         out_path = os.path.join(tempfile.gettempdir(), "yt_summary.pdf")
         build_pdf(out_path, title=title, video_url=url, sections=sections, continuous=True)
+
+        # confirmation message with path
+        st.info(f"✅ PDF successfully generated at: `{out_path}`")
 
         # replace disabled placeholder with actual download button
         with open(out_path, "rb") as f:
