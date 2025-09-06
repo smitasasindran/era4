@@ -15,9 +15,19 @@ class TranscriptSegment:
 
 def ytdlp_extract(url: str) -> Dict[str, Any]:
     import yt_dlp
-    ydl_opts = {'quiet': True, 'skip_download': True, 'noplaylist': True, 'cachedir': False}
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        return ydl.extract_info(url, download=False)
+    ydl_opts = {
+        'quiet': True,
+        'skip_download': True,
+        'noplaylist': True,
+        'cachedir': False,
+        'ignoreerrors': True
+    }
+    try:
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            return ydl.extract_info(url, download=False)
+    except Exception as ex:
+        return {}
 
 
 def ytdlp_get_stream_url(url: str, resolution: int = 720) -> str:
@@ -31,6 +41,7 @@ def ytdlp_get_stream_url(url: str, resolution: int = 720) -> str:
         'quiet': True,
         'noplaylist': True,
         'cachedir': False,
+        'ignoreerrors': True,
         'format': 'bestvideo+bestaudio/best',
     }
 
