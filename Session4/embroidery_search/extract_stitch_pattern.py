@@ -9,9 +9,13 @@ import os
 # -------- Configuration --------
 PDF_FILE = 'Anchor-Modern-Landscape-pattern.pdf'
 OUTPUT_IMAGE = 'pattern_page.png'
+OUTPUT_GRID_IMAGE = 'detected_grid_lines.png'
 OUTPUT_MATRIX_CSV = 'pattern_matrix.csv'
 OUTPUT_MAPPING_JSON = 'symbol_to_number_mapping.json'
 DPI = 300
+
+# Specify tesseract executable path if needed
+# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 # -------- Step 1: Convert PDF to Image --------
 print("[INFO] Converting PDF to image...")
@@ -22,59 +26,75 @@ images[0].save(OUTPUT_IMAGE, 'PNG')
 print("[INFO] Preprocessing image...")
 img = cv2.imread(OUTPUT_IMAGE)
 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-binary = cv2.adaptiveThreshold(gray, 255,
+blur = cv2.GaussianBlur(gray, (3, 3), 0)
+
+binary = cv2.adaptiveThreshold(blur, 255,
                                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                               cv2.THRESH_BINARY_INV, 11, 2)
+                               cv2.THRESH_BINARY_INV, 15, 5)
 
-kernel = np.ones((3,3), np.uint8)
-binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+kernel = np.ones((2, 2), np.uint8)
+binary = cv2.dilate(binary, kernel, iterations=1)
 
-# -------- Step 3: Detect Grid Lines --------
+# -------- Step 3: Detect Grid Lines with Hough Transform --------
 print("[INFO] Detecting grid lines...")
-horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (40,1))
-vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1,40))
+lines = cv2.HoughLinesP(binary, rho=1, theta=np.pi/180, threshold=200,
+                        minLineLength=50, maxLineGap=10)
 
-horizontal_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel)
-vertical_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel)
+horizontal_lines_img = np.zeros_like(binary)
+vertical_lines_img = np.zeros_like(binary)
 
-grid_lines = cv2.add(horizontal_lines, vertical_lines)
+for line in lines:
+    x1, y1, x2, y2 = line[0]
+    angle = np.arctan2(y2 - y1, x2 - x1) * (180 / np.pi)
 
-# -------- Step 4: Find Grid Cells --------
-print("[INFO] Finding grid cells...")
-contours, _ = cv2.findContours(grid_lines, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-bounding_boxes = [cv2.boundingRect(c) for c in contours]
+    if abs(angle) < 10 or abs(angle - 180) < 10:
+        cv2.line(horizontal_lines_img, (x1, y1), (x2, y2), 255, 1)
+    elif abs(angle - 90) < 10 or abs(angle + 90) < 10:
+        cv2.line(vertical_lines_img, (x1, y1), (x2, y2), 255, 1)
 
-# Filter out very small boxes (noise)
-bounding_boxes = [b for b in bounding_boxes if b[2] > 10 and b[3] > 10]
+grid_lines = cv2.add(horizontal_lines_img, vertical_lines_img)
+cv2.imwrite(OUTPUT_GRID_IMAGE, grid_lines)
 
-# Sort top-to-bottom, left-to-right
-bounding_boxes = sorted(bounding_boxes, key=lambda b: (b[1], b[0]))
+# -------- Step 4: Find Grid Cell Intersections --------
+print("[INFO] Detecting grid cell intersections...")
+# Find intersection points
+intersections = cv2.bitwise_and(horizontal_lines_img, vertical_lines_img)
 
-num_cells = len(bounding_boxes)
-num_cols = int(np.sqrt(num_cells))
-num_rows = num_cols  # Assumption: roughly square grid
+# Detect corner points using goodFeaturesToTrack
+corners = cv2.goodFeaturesToTrack(intersections, maxCorners=1000, qualityLevel=0.01, minDistance=10)
+corners = np.int0(corners)
+
+# Sort corners top-to-bottom, left-to-right
+corners = sorted(corners, key=lambda c: (c.ravel()[1], c.ravel()[0]))
+
+# Heuristic: Determine grid size by counting unique Y and X coordinates
+ys = sorted(list(set(c.ravel()[1] for c in corners)))
+xs = sorted(list(set(c.ravel()[0] for c in corners)))
+num_rows = len(ys) - 1
+num_cols = len(xs) - 1
 
 # -------- Step 5: Extract Cells and Recognize Symbols --------
 print("[INFO] Extracting cells and recognizing symbols...")
-symbol_to_number = {'.': 0}  # Empty cell mapping
+symbol_to_number = {'.': 0}
 matrix = np.zeros((num_rows, num_cols), dtype=int)
 
-for idx, (x, y, w, h) in enumerate(bounding_boxes):
-    cell_img = binary[y:y+h, x:x+w]
+for row in range(num_rows):
+    for col in range(num_cols):
+        x1 = xs[col]
+        y1 = ys[row]
+        x2 = xs[col + 1]
+        y2 = ys[row + 1]
 
-    symbol = pytesseract.image_to_string(cell_img, config='--psm 10 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789').strip()
-    # OCR single symbol per cell
-    # symbol = pytesseract.image_to_string(cell_img, config='--psm 10 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789').strip()
+        cell_img = binary[y1:y2, x1:x2]
 
-    if len(symbol) == 0:
-        symbol = '.'
+        symbol = pytesseract.image_to_string(cell_img, config='--psm 10 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789').strip()
 
-    if symbol not in symbol_to_number:
-        symbol_to_number[symbol] = len(symbol_to_number)
+        if len(symbol) == 0:
+            symbol = '.'
 
-    row = idx // num_cols
-    col = idx % num_cols
-    if row < num_rows and col < num_cols:
+        if symbol not in symbol_to_number:
+            symbol_to_number[symbol] = len(symbol_to_number)
+
         matrix[row, col] = symbol_to_number[symbol]
 
 # -------- Step 6: Export Matrix and Mapping --------
@@ -87,3 +107,4 @@ with open(OUTPUT_MAPPING_JSON, 'w') as f:
 
 print(f"[SUCCESS] Matrix saved to {OUTPUT_MATRIX_CSV}")
 print(f"[SUCCESS] Symbol mapping saved to {OUTPUT_MAPPING_JSON}")
+print(f"[INFO] Grid visualization saved to {OUTPUT_GRID_IMAGE}")
