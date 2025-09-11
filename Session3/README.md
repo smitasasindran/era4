@@ -41,3 +41,5 @@ Notes:
 - If the video has no official transcript, set --use-auto to try auto-generated transcripts.
 - For long videos, the script chunks the transcript and merges Gemini-suggested key sections.
 - You can tune --max-sections to limit how many sections make the final PDF.
+- While running from EC2, yt_dlp needs valid cookies. Export cookies from local browser using 
+

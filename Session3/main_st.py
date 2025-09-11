@@ -10,6 +10,7 @@ from utils import extract_video_id, ffmpeg_screenshot, human_time, parse_timecod
 from youtube import ytdlp_extract, ytdlp_get_stream_url, fetch_transcript, segments_to_text
 from gemini import init_gemini, call_gemini_sections
 from pdf_builder import build_pdf, Section
+from search import openai_embed, build_faiss_index, search_transcripts
 
 
 def run_pipeline(url, lang="en", use_auto=False, model="gemini-1.5-flash",
@@ -29,6 +30,7 @@ def run_pipeline(url, lang="en", use_auto=False, model="gemini-1.5-flash",
     print(transcript_text)
 
     model_obj = init_gemini(model)
+    print(f"Getting sections summary from Gemini")
     sections_json = call_gemini_sections(model_obj, transcript_text, max_sections=max_sections)
     print(f"Got section summary from Gemini")
     raw_sections = sections_json.get("sections", [])
@@ -91,6 +93,24 @@ def _image_to_data_uri(path: str) -> str:
     except Exception:
         return ""
 
+def show_search_results(results):
+    if not results:
+        st.info("No results found.")
+        return
+
+    for r in results:
+        ts_label = f"{human_time(r['start'])} – {human_time(r['end'])}"
+        st.markdown(
+            f"""
+            <div style="padding:8px; border:1px solid #ddd; border-radius:8px; margin:6px 0; background:#fafafa;">
+                <a href="#" onclick="seek({int(r['start'])}); return false;" style="text-decoration:none; font-weight:bold; color:#0b5ed7;">
+                    ⏱️ {ts_label}
+                </a>
+                <div style="margin-top:4px;">{html_escape.escape(r['text'])}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 def embed_player_with_sections(video_id: str, sections, player_width=720, player_height=405):
     style = """
@@ -257,6 +277,18 @@ def main():
                 player_height=405
             )
 
+        # # Build FAISS index
+        # index, vector_texts = build_faiss_index(st.session_state.transcript_text, openai_embed)
+        #
+        # # Search input
+        # search_query = st.text_input("Search transcript:")
+        #
+        # if search_query:
+        #     results = search_transcripts(index, vector_texts, search_query)
+        #     with c2:
+        #         st.markdown("#### Search Results:")
+        #         show_search_results(results)
+
         # Generate PDF once and store path
         if "pdf_path" not in st.session_state:
             out_path = os.path.join(tempfile.gettempdir(), "yt_summary.pdf")
@@ -270,6 +302,14 @@ def main():
             st.session_state.pdf_path = out_path
             st.info(f"✅ PDF successfully generated at: `{out_path}`")
 
+        # # Download PDF button
+        # pdf_bytes = build_pdf(st.session_state.title, st.session_state.sections)
+        # st.download_button(
+        #     label="📥 Download PDF",
+        #     data=pdf_bytes,
+        #     file_name=f"{st.session_state.title}.pdf",
+        #     mime="application/pdf",
+        # )
         with open(st.session_state.pdf_path, "rb") as f:
             pdf_placeholder.download_button(
                 "📥 Download PDF",
