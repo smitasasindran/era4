@@ -38,6 +38,13 @@ You can use any image editor or download free icons from sites like:
 - [Icons8](https://icons8.com/)
 - [Feather Icons](https://feathericons.com/)
 
+
+If you want to use the 'Export PDF' option, you may need to download these pdf-related libraries to your local folder, before 'Load unpacked' to chrome extension. Create a local directory, example: 
+mkdir libs
+curl -L -o libs/jspdf.umd.min.js https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js
+curl -L -o libs/jspdf.plugin.autotable.min.js https://cdn.jsdelivr.net/npm/jspdf-autotable@3.5.29/dist/jspdf.plugin.autotable.min.js
+
+
 ## Usage
 
 ### Taking Screenshots
