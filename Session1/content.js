@@ -106,10 +106,12 @@ function extractTranscriptData() {
     
     // Look for transcript segments in different possible selectors
     let transcriptItems = document.querySelectorAll('.ytd-transcript-segment-renderer, [data-segment-start-time], .ytd-transcript-segment-text');
+    
     if (transcriptItems.length === 0) {
       // Try alternative selectors for YouTube transcripts
       transcriptItems = document.querySelectorAll('[data-segment-start-time], .ytd-transcript-segment-text, .ytd-transcript-segment-content');
     }
+    
     if (transcriptItems.length === 0) {
       // Try looking for transcript panel that might already be open
       const transcriptPanel = document.querySelector('ytd-transcript-renderer, .ytd-transcript-renderer');
@@ -118,12 +120,13 @@ function extractTranscriptData() {
         transcriptItems = transcriptPanel.querySelectorAll('[data-segment-start-time], .ytd-transcript-segment-text, .ytd-transcript-segment-content');
       }
     }
+    
     if (transcriptItems.length === 0) {
-      // Try one more approach - look for any elements with transcript-like content
+      // Fallback: heuristic scan
       const allElements = document.querySelectorAll('*');
       transcriptItems = Array.from(allElements).filter(el => {
         const text = el.textContent || '';
-        const hasTimestamp = /\d{1,2}:\d{2}/.test(text);
+        const hasTimestamp = /\b\d{1,2}:\d{2}(?::\d{2})?\b/.test(text);
         const hasText = text.length > 10 && text.length < 200;
         return hasTimestamp && hasText && el.children.length === 0;
       });
@@ -132,53 +135,128 @@ function extractTranscriptData() {
     if (transcriptItems.length > 0) {
       console.log(`Found ${transcriptItems.length} potential transcript items`);
       
-      transcriptData = Array.from(transcriptItems).map(item => {
-        // Prefer numeric seconds from data attribute
+      const videoEl = document.querySelector('video');
+      const videoDuration = videoEl && isFinite(videoEl.duration) ? videoEl.duration : NaN;
+      
+      // Build segments adaptively resolving 2-part timestamps (MM:SS vs HH:MM)
+      const segments = [];
+      let lastSeconds = null;
+      
+      for (const item of transcriptItems) {
+        // Determine seconds (prefer numeric attribute)
         let seconds = null;
-        let rawTs = item.getAttribute('data-segment-start-time');
-        let text = '';
         
-        if (rawTs && !isNaN(rawTs)) {
-          seconds = Math.floor(parseFloat(rawTs));
+        // a) Direct attribute on the item
+        const rawAttr = item.getAttribute('data-segment-start-time');
+        if (rawAttr && !isNaN(rawAttr)) {
+          seconds = Math.floor(parseFloat(rawAttr));
         }
         
+        // b) Numeric attribute on a descendant
         if (seconds == null) {
-          // Fallback: find a timestamp element/text and parse it
-          const timestampElement = item.querySelector('[data-segment-start-time], .ytd-transcript-segment-timestamp');
+          const tsNodeWithAttr = item.querySelector('[data-segment-start-time]');
+          const attrVal = tsNodeWithAttr ? tsNodeWithAttr.getAttribute('data-segment-start-time') : null;
+          if (attrVal && !isNaN(attrVal)) {
+            seconds = Math.floor(parseFloat(attrVal));
+          }
+        }
+        
+        // c) Parse displayed timestamp text
+        if (seconds == null) {
           let displayTs = '';
-          if (timestampElement && timestampElement.textContent) {
-            displayTs = timestampElement.textContent.trim();
+          const tsNode = item.querySelector('.ytd-transcript-segment-timestamp');
+          if (tsNode && tsNode.textContent) {
+            displayTs = tsNode.textContent.trim();
           } else {
             const textContent = item.textContent || '';
-            const timeMatch = textContent.match(/(\d{1,2}:\d{2}(?::\d{2})?)/);
-            if (timeMatch) {
-              displayTs = timeMatch[1];
+            const m3 = textContent.match(/\b(\d{1,2}:\d{2}:\d{2})\b/);
+            const m2 = textContent.match(/\b(\d{1,2}:\d{2})\b/);
+            if (m3) {
+              displayTs = m3[1];
+            } else if (m2) {
+              displayTs = m2[1];
             }
           }
+          
           if (displayTs) {
-            seconds = parseTranscriptTime(displayTs); // HH:MM or HH:MM:SS support
+            const parts = displayTs.split(':');
+            if (parts.length === 3) {
+              // HH:MM:SS
+              seconds = parseTime(displayTs);
+            } else if (parts.length === 2) {
+              // Ambiguous: try both and pick the one closer to previous segment
+              const asMMSS = parseTime(displayTs);           // minutes:seconds
+              const asHHMM = parseTranscriptTime(displayTs); // hours:minutes
+              
+              if (lastSeconds != null) {
+                const dMMSS = Math.abs(asMMSS - lastSeconds);
+                const dHHMM = Math.abs(asHHMM - lastSeconds);
+                // Pick the candidate with smaller delta; ties prefer MM:SS
+                seconds = dMMSS <= dHHMM ? asMMSS : asHHMM;
+              } else {
+                // No history yet: prefer MM:SS (YouTube shows MM:SS before 1h)
+                seconds = asMMSS;
+                // If clearly a >1h context and MM:SS would be unrealistically small vs duration, flip to HH:MM
+                if (isFinite(videoDuration) && videoDuration >= 3600 && asHHMM <= videoDuration && asMMSS < 120) {
+                  // Only flip if the HH:MM candidate is plausible and MM:SS is too small to be first meaningful segment
+                  seconds = asHHMM;
+                }
+              }
+            }
           }
         }
         
-        // Extract text content
+        // If we still couldn't determine a timestamp, skip this segment
+        if (seconds == null || !isFinite(seconds)) continue;
+        
+        // Extract clean text (strip timestamp)
+        let contentText = '';
         const textElement = item.querySelector('.ytd-transcript-segment-text, .ytd-transcript-segment-content');
-        if (textElement) {
-          text = textElement.textContent.trim();
+        if (textElement && textElement.textContent) {
+          contentText = textElement.textContent;
         } else {
-          if (!text) text = item.textContent.trim();
+          contentText = item.textContent || '';
         }
         
-        if (seconds == null) seconds = 0;
+        contentText = contentText
+          .replace(/\b\d{1,2}:\d{2}:\d{2}\b/, '')
+          .replace(/\b\d{1,2}:\d{2}\b/, '')
+          .replace(/\s+/g, ' ')
+          .trim();
         
-        return {
+        if (!contentText) continue;
+        
+        // Drop out-of-range seconds if we know duration
+        if (isFinite(videoDuration) && seconds > videoDuration + 1) continue;
+        
+        segments.push({
           timestamp: formatHHMMSS(seconds),
-          text: text || '',
+          text: contentText,
           seconds: seconds
-        };
-      }).filter(item => item.text && item.timestamp && item.text.length > 5);
+        });
+        
+        lastSeconds = seconds;
+      }
+      
+      // Deduplicate by text, prefer non-zero seconds; if both non-zero, keep earliest
+      const byText = new Map();
+      for (const seg of segments) {
+        const key = seg.text;
+        const existing = byText.get(key);
+        if (!existing) {
+          byText.set(key, seg);
+        } else {
+          if (existing.seconds === 0 && seg.seconds > 0) {
+            byText.set(key, seg);
+          } else if (existing.seconds > 0 && seg.seconds > 0 && seg.seconds < existing.seconds) {
+            byText.set(key, seg);
+          }
+        }
+      }
+      
+      transcriptData = Array.from(byText.values());
       
       console.log('Transcript data extracted:', transcriptData.length, 'segments');
-      
       if (transcriptData.length > 0) {
         showNotification(`Found ${transcriptData.length} transcript segments`, 'success');
         console.log('Transcript data:', transcriptData);
@@ -278,7 +356,7 @@ async function bookmarkTimestamp() {
         const itemTime = (item.seconds !== undefined && item.seconds !== null)
           ? item.seconds
           : parseTranscriptTime(item.timestamp);
-        console.log('Transcript Item time:', itemTime, 'currentTime:', currentTime);
+        // console.log('Transcript Item time:', itemTime, 'currentTime:', currentTime);
         return itemTime >= currentTime - 20 && itemTime <= currentTime + 20;
       });
       
