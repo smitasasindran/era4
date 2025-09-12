@@ -106,12 +106,10 @@ function extractTranscriptData() {
     
     // Look for transcript segments in different possible selectors
     let transcriptItems = document.querySelectorAll('.ytd-transcript-segment-renderer, [data-segment-start-time], .ytd-transcript-segment-text');
-    
     if (transcriptItems.length === 0) {
       // Try alternative selectors for YouTube transcripts
       transcriptItems = document.querySelectorAll('[data-segment-start-time], .ytd-transcript-segment-text, .ytd-transcript-segment-content');
     }
-    
     if (transcriptItems.length === 0) {
       // Try looking for transcript panel that might already be open
       const transcriptPanel = document.querySelector('ytd-transcript-renderer, .ytd-transcript-renderer');
@@ -120,7 +118,6 @@ function extractTranscriptData() {
         transcriptItems = transcriptPanel.querySelectorAll('[data-segment-start-time], .ytd-transcript-segment-text, .ytd-transcript-segment-content');
       }
     }
-    
     if (transcriptItems.length === 0) {
       // Try one more approach - look for any elements with transcript-like content
       const allElements = document.querySelectorAll('*');
@@ -136,49 +133,49 @@ function extractTranscriptData() {
       console.log(`Found ${transcriptItems.length} potential transcript items`);
       
       transcriptData = Array.from(transcriptItems).map(item => {
-        // Try to get timestamp from data attribute first
-        let timestamp = item.getAttribute('data-segment-start-time');
+        // Prefer numeric seconds from data attribute
+        let seconds = null;
+        let rawTs = item.getAttribute('data-segment-start-time');
         let text = '';
         
-        if (!timestamp) {
-          // Fallback to looking for timestamp element
+        if (rawTs && !isNaN(rawTs)) {
+          seconds = Math.floor(parseFloat(rawTs));
+        }
+        
+        if (seconds == null) {
+          // Fallback: find a timestamp element/text and parse it
           const timestampElement = item.querySelector('[data-segment-start-time], .ytd-transcript-segment-timestamp');
-          if (timestampElement) {
-            timestamp = timestampElement.textContent.trim();
-          }
-        }
-        
-        // If still no timestamp, try to extract from text content
-        if (!timestamp) {
-          const textContent = item.textContent || '';
-          const timeMatch = textContent.match(/(\d{1,2}:\d{2})/);
-          if (timeMatch) {
-            timestamp = timeMatch[1];
-            text = textContent.replace(timeMatch[0], '').trim();
-          }
-        }
-        
-        // Get text content if not already extracted
-        if (!text) {
-          const textElement = item.querySelector('.ytd-transcript-segment-text, .ytd-transcript-segment-content');
-          if (textElement) {
-            text = textElement.textContent.trim();
+          let displayTs = '';
+          if (timestampElement && timestampElement.textContent) {
+            displayTs = timestampElement.textContent.trim();
           } else {
-            text = item.textContent.trim();
+            const textContent = item.textContent || '';
+            const timeMatch = textContent.match(/(\d{1,2}:\d{2}(?::\d{2})?)/);
+            if (timeMatch) {
+              displayTs = timeMatch[1];
+            }
+          }
+          if (displayTs) {
+            seconds = parseTranscriptTime(displayTs); // HH:MM or HH:MM:SS support
           }
         }
         
-        // Convert timestamp to seconds if it's a number
-        if (timestamp && !isNaN(timestamp)) {
-          timestamp = formatTime(parseFloat(timestamp));
+        // Extract text content
+        const textElement = item.querySelector('.ytd-transcript-segment-text, .ytd-transcript-segment-content');
+        if (textElement) {
+          text = textElement.textContent.trim();
+        } else {
+          if (!text) text = item.textContent.trim();
         }
+        
+        if (seconds == null) seconds = 0;
         
         return {
-          timestamp: timestamp || '',
+          timestamp: formatHHMMSS(seconds),
           text: text || '',
-          seconds: timestamp ? parseTime(timestamp) : 0
+          seconds: seconds
         };
-      }).filter(item => item.text && item.timestamp && item.text.length > 5); // Only keep items with both text and timestamp
+      }).filter(item => item.text && item.timestamp && item.text.length > 5);
       
       console.log('Transcript data extracted:', transcriptData.length, 'segments');
       
@@ -230,7 +227,8 @@ async function takeScreenshot() {
     const screenshot = canvas.toDataURL('image/jpeg', 0.8);
     
     // Get current timestamp
-    const timestamp = formatTime(video.currentTime);
+    // const timestamp = formatTime(video.currentTime);
+    const timestamp = formatHHMMSS(video.currentTime);
     
     // Save screenshot
     chrome.runtime.sendMessage({
@@ -265,30 +263,38 @@ async function bookmarkTimestamp() {
     }
     
     const currentTime = video.currentTime;
-    const timestamp = formatTime(currentTime);
+    // const timestamp = formatTime(currentTime);
+    const timestamp = formatHHMMSS(currentTime);
+    console.log('Current Bookmark formatted time:', timestamp);
     
     // Get transcript around current time (20 seconds before and 20 seconds after)
     let transcript = '';
     let relevantTranscripts = [];
     
     if (transcriptData && transcriptData.length > 0) {
+      console.log('Filtering transcript data...');
       relevantTranscripts = transcriptData.filter(item => {
-        // Use the seconds property if available, otherwise parse the timestamp
-        const itemTime = item.seconds || parseTime(item.timestamp);
+        // Use the seconds property if available, otherwise parse the transcript timestamp as HH:MM
+        const itemTime = (item.seconds !== undefined && item.seconds !== null)
+          ? item.seconds
+          : parseTranscriptTime(item.timestamp);
+        console.log('Transcript Item time:', itemTime, 'currentTime:', currentTime);
         return itemTime >= currentTime - 20 && itemTime <= currentTime + 20;
       });
       
       if (relevantTranscripts.length > 0) {
         // Sort by time and format nicely
-        relevantTranscripts.sort((a, b) => (a.seconds || parseTime(a.timestamp)) - (b.seconds || parseTime(b.timestamp)));
+        relevantTranscripts.sort((a, b) => {
+          const ta = (a.seconds !== undefined && a.seconds !== null) ? a.seconds : parseTranscriptTime(a.timestamp);
+          const tb = (b.seconds !== undefined && b.seconds !== null) ? b.seconds : parseTranscriptTime(b.timestamp);
+          return ta - tb;
+        });
         
         transcript = relevantTranscripts.map(item => {
-          const time = item.timestamp || formatTime(item.seconds || parseTime(item.timestamp));
+          // const time = item.timestamp || formatTime((item.seconds !== undefined && item.seconds !== null) ? item.seconds : parseTranscriptTime(item.timestamp));
+          const time = item.timestamp || formatHHMMSS((item.seconds !== undefined && item.seconds !== null) ? item.seconds : parseTranscriptTime(item.timestamp));
           return `${time}: ${item.text}`;
         }).join('\n');
-        
-        console.log(`Found ${relevantTranscripts.length} transcript segments around timestamp ${timestamp}`);
-        console.log('Relevant transcripts:', relevantTranscripts);
       }
     }
     
@@ -319,18 +325,40 @@ async function bookmarkTimestamp() {
   }
 }
 
-// Helper function to format time in MM:SS format
-function formatTime(seconds) {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+// // Helper function to format time in MM:SS format
+// function formatTime(seconds) {
+//   const mins = Math.floor(seconds / 60);
+//   const secs = Math.floor(seconds % 60);
+//   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+// }
+
+// Helper function to format time in HH:MM:SS
+function formatHHMMSS(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds || 0));
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = s % 60;
+  return `${hrs.toString().padStart(2,'0')}:${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
 }
 
-// Helper function to parse timestamp string to seconds
+// Existing parseTime kept for navigation (supports MM:SS and HH:MM:SS)
 function parseTime(timeString) {
   const parts = timeString.split(':').map(Number);
   if (parts.length === 2) {
     return parts[0] * 60 + parts[1];
+  } else if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+  return 0;
+}
+
+// Parse transcript display timestamps (HH:MM or HH:MM:SS) into seconds
+function parseTranscriptTime(timeString) {
+  if (!timeString) return 0;
+  const parts = timeString.split(':').map(Number);
+  if (parts.length === 2) {
+    // Treat as HH:MM (YouTube transcript uses HH:MM after 1h)
+    return parts[0] * 3600 + parts[1] * 60;
   } else if (parts.length === 3) {
     return parts[0] * 3600 + parts[1] * 60 + parts[2];
   }
@@ -418,17 +446,15 @@ function parseSRTFile(content) {
       const timeLine = lines[1];
       const text = lines.slice(2).join(' ').trim();
       
-      // Parse SRT timestamp format (00:00:00,000 --> 00:00:00,000)
       const timeMatch = timeLine.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})/);
       if (timeMatch) {
         const hours = parseInt(timeMatch[1]);
         const minutes = parseInt(timeMatch[2]);
         const seconds = parseInt(timeMatch[3]);
         const totalSeconds = hours * 3600 + minutes * 60 + seconds;
-        const timestamp = formatTime(totalSeconds);
         
         segments.push({
-          timestamp: timestamp,
+          timestamp: formatHHMMSS(totalSeconds),
           text: text,
           seconds: totalSeconds
         });
@@ -448,42 +474,33 @@ function parseVTTFile(content) {
   
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
-    
-    // Skip header lines
     if (line === 'WEBVTT' || line === '' || line.includes('-->')) {
       continue;
     }
-    
-    // Check if line contains timestamp
     const timeMatch = line.match(/(\d{2}):(\d{2}):(\d{2})\.(\d{3})/);
     if (timeMatch) {
-      // Save previous segment if exists
       if (currentTime && currentText) {
         const totalSeconds = parseTime(currentTime);
         segments.push({
-          timestamp: currentTime,
+          timestamp: formatHHMMSS(totalSeconds),
           text: currentText.trim(),
           seconds: totalSeconds
         });
       }
-      
       currentTime = timeMatch[0];
       currentText = '';
     } else if (line && currentTime) {
       currentText += line + ' ';
     }
   }
-  
-  // Add last segment
   if (currentTime && currentText) {
     const totalSeconds = parseTime(currentTime);
     segments.push({
-      timestamp: currentTime,
+      timestamp: formatHHMMSS(totalSeconds),
       text: currentText.trim(),
       seconds: totalSeconds
     });
   }
-  
   return segments;
 }
 
@@ -492,18 +509,24 @@ function parseJSONTranscript(content) {
   try {
     const data = JSON.parse(content);
     if (Array.isArray(data)) {
-      return data.map(item => ({
-        timestamp: item.timestamp || item.time || formatTime(item.seconds || 0),
-        text: item.text || item.content || '',
-        seconds: item.seconds || parseTime(item.timestamp || item.time || '0:00')
-      }));
+      return data.map(item => {
+        const secs = item.seconds || parseTranscriptTime(item.timestamp || item.time || '0:00');
+        return {
+          timestamp: formatHHMMSS(secs),
+          text: item.text || item.content || '',
+          seconds: secs
+        };
+      });
     } else if (data.segments || data.transcript) {
       const segments = data.segments || data.transcript;
-      return segments.map(item => ({
-        timestamp: item.timestamp || item.time || formatTime(item.seconds || 0),
-        text: item.text || item.content || '',
-        seconds: item.seconds || parseTime(item.timestamp || item.time || '0:00')
-      }));
+      return segments.map(item => {
+        const secs = item.seconds || parseTranscriptTime(item.timestamp || item.time || '0:00');
+        return {
+          timestamp: formatHHMMSS(secs),
+          text: item.text || item.content || '',
+          seconds: secs
+        };
+      });
     }
   } catch (error) {
     console.error('Error parsing JSON:', error);
@@ -517,17 +540,16 @@ function parsePlainTextTranscript(content) {
   const lines = content.split('\n').filter(line => line.trim());
   
   for (const line of lines) {
-    // Look for timestamp patterns like [00:00] or (00:00) or 00:00
+    // [HH:MM] or (HH:MM) or HH:MM
     const timeMatch = line.match(/(?:\[|\()?(\d{1,2}):(\d{2})(?:\]|\))?\s*(.+)/);
     if (timeMatch) {
-      const minutes = parseInt(timeMatch[1]);
-      const seconds = parseInt(timeMatch[2]);
+      const hours = parseInt(timeMatch[1], 10);
+      const minutes = parseInt(timeMatch[2], 10);
       const text = timeMatch[3].trim();
-      const totalSeconds = minutes * 60 + seconds;
-      const timestamp = formatTime(totalSeconds);
+      const totalSeconds = hours * 3600 + minutes * 60;
       
       segments.push({
-        timestamp: timestamp,
+        timestamp: formatHHMMSS(totalSeconds),
         text: text,
         seconds: totalSeconds
       });
