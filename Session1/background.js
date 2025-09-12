@@ -29,9 +29,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         screenshot: request.screenshot,
         date: new Date().toISOString()
       });
-      chrome.storage.local.set({ screenshots: screenshots });
+      chrome.storage.local.set({ screenshots: screenshots }, () => {
+        if (chrome.runtime.lastError) {
+          sendResponse({ success: false, error: chrome.runtime.lastError.message });
+        } else {
+          sendResponse({ success: true });
+        }
+      });
     });
-    sendResponse({ success: true });
+    return true; // keep the message channel open for async sendResponse
   } else if (request.action === "saveBookmark") {
     // Save bookmark data to storage
     chrome.storage.local.get(['bookmarks'], (result) => {
@@ -44,9 +50,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         transcript: request.transcript,
         date: new Date().toISOString()
       });
-      chrome.storage.local.set({ bookmarks: bookmarks });
+      chrome.storage.local.set({ bookmarks: bookmarks }, () => {
+        if (chrome.runtime.lastError) {
+          sendResponse({ success: false, error: chrome.runtime.lastError.message });
+        } else {
+          sendResponse({ success: true });
+        }
+      });
     });
-    sendResponse({ success: true });
+    return true; // keep the message channel open for async sendResponse
   }
-  return true;
+  return false;
 });

@@ -203,17 +203,31 @@ async function takeScreenshot() {
       return;
     }
     
-    // Create canvas to capture video frame
+    // Create canvas to capture video frame (downscale if very large)
+    const maxWidth = 1280;
+    const maxHeight = 720;
+    let targetWidth = video.videoWidth;
+    let targetHeight = video.videoHeight;
+
+    const widthRatio = maxWidth / targetWidth;
+    const heightRatio = maxHeight / targetHeight;
+    const scale = Math.min(1, widthRatio, heightRatio);
+
+    if (scale < 1) {
+      targetWidth = Math.floor(targetWidth * scale);
+      targetHeight = Math.floor(targetHeight * scale);
+    }
+
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
     
     // Draw current video frame to canvas
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
     
-    // Convert to base64 data URL
-    const screenshot = canvas.toDataURL('image/png');
+    // Convert to compressed JPEG to reduce storage size
+    const screenshot = canvas.toDataURL('image/jpeg', 0.8);
     
     // Get current timestamp
     const timestamp = formatTime(video.currentTime);
@@ -228,6 +242,10 @@ async function takeScreenshot() {
     }, (response) => {
       if (response && response.success) {
         showNotification(`Screenshot saved at ${timestamp}`, 'success');
+      } else {
+        const err = response && response.error ? `: ${response.error}` : '';
+        showNotification(`Failed to save screenshot${err}`, 'error');
+        console.error('Failed to save screenshot', response);
       }
     });
     
