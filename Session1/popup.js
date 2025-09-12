@@ -490,37 +490,32 @@ async function exportPdfData() {
           doc.text('Bookmark with Transcript', 25, yPosition);
           yPosition += 8;
 
+          // Add transcript text with proper wrapping and line height
           const transcript = item.data.transcript;
           if (transcript && transcript !== 'No transcript available for this timestamp') {
-            doc.setFontSize(10);
-            doc.setTextColor(100, 100, 100);
-
-            const maxLineLength = 80;
-            const lines = [];
-            let currentLine = '';
-
-            transcript.split(' ').forEach(word => {
-              if ((currentLine + ' ' + word).length <= maxLineLength) {
-                currentLine += (currentLine ? ' ' : '') + word;
-              } else {
-                if (currentLine) lines.push(currentLine);
-                currentLine = word;
+            // Render as a single-cell table for automatic wrapping and page breaks
+            doc.autoTable({
+              startY: yPosition,
+              margin: { left: 25, right: 15 },
+              theme: 'plain',
+              styles: {
+                fontSize: 10,
+                lineHeight: 1.35,          // increase line spacing to avoid overlap
+                cellPadding: { top: 2, right: 2, bottom: 2, left: 2 },
+                textColor: [100, 100, 100]
+              },
+              body: [[transcript]],
+              columnStyles: {
+                0: { cellWidth: 165 }      // fit within page margins
               }
             });
-            if (currentLine) lines.push(currentLine);
 
-            for (const line of lines) {
-              if (yPosition > 280) {
-                doc.addPage();
-                yPosition = 20;
-              }
-              doc.text(line, 30, yPosition);
-              yPosition += 6;
-            }
-
+            // Move cursor below the table and restore styles
+            yPosition = doc.lastAutoTable.finalY + 10;
             doc.setTextColor(0, 0, 0);
             doc.setFontSize(12);
           }
+
         }
 
         yPosition += 15;
