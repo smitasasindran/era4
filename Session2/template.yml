@@ -9,7 +9,7 @@ Resources:
       Handler: flask_app.handler # Change here
       Runtime: python3.12
       CodeUri: .
-      MemorySize: 512
+      MemorySize: 256
       Timeout: 30
       Layers:
         - arn:aws:lambda:ap-south-1:102507572752:layer:opencv-headless-py312:1
