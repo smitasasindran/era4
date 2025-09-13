@@ -22,15 +22,18 @@ rtsp_lock = threading.Lock()
 rtsp_thread = None
 
 frame_queue = queue.Queue(maxsize=1)  # Keeps only latest frame
+rtsp_stop_event = threading.Event()
+
 
 def rtsp_processing(rtsp_url):
     cap = cv2.VideoCapture(rtsp_url)
     if not cap.isOpened():
         print("[Error] Cannot open RTSP stream.")
         return
+
     count = 0
 
-    while True:
+    while not rtsp_stop_event.is_set():
         ret, frame = cap.read()
         if not ret:
             print("[Error] RTSP frame read failed, stopping stream.")
@@ -44,7 +47,6 @@ def rtsp_processing(rtsp_url):
             count = 0
             print(f"Processed 1000 frames!")
 
-        # Always keep only the latest frame in the queue
         if not frame_queue.empty():
             try:
                 frame_queue.get_nowait()
@@ -53,8 +55,10 @@ def rtsp_processing(rtsp_url):
 
         frame_queue.put(processed_frame)
 
-        # Throttle the loop to avoid CPU overload
         time.sleep(0.03)  # ~30 FPS max
+
+    cap.release()
+    print("[Info] RTSP processing stopped cleanly.")
 
 
 def generate_mjpeg():
@@ -112,6 +116,9 @@ def index():
         elif input_type == "rtsp":
             rtsp_url = request.form.get("rtsp_url")
 
+            # Clear stop event before starting new thread
+            rtsp_stop_event.clear()
+
             if rtsp_thread is None or not rtsp_thread.is_alive():
                 rtsp_thread = threading.Thread(target=rtsp_processing, args=(rtsp_url,), daemon=True)
                 rtsp_thread.start()
@@ -132,6 +139,15 @@ def show_result(filename):
 @app.route("/stream")
 def stream():
     return render_template("stream.html")
+
+
+@app.route("/stop_stream", methods=["POST", "GET"])
+def stop_stream():
+    global rtsp_stop_event, rtsp_thread
+
+    rtsp_stop_event.set()
+    rtsp_thread = None  # Clear thread reference
+    return "Stream stopped", 200
 
 
 @app.route("/video_feed")
