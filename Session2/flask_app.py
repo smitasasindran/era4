@@ -7,7 +7,7 @@ import threading
 from flask import Flask, render_template, request, Response, redirect, url_for, send_from_directory
 from werkzeug.utils import secure_filename
 import queue
-
+from mangum import Mangum
 from background_creator import background_extraction, background_extraction_frame
 
 app = Flask(__name__)
@@ -161,5 +161,8 @@ def result_file(filename):
     return send_from_directory(app.config["RESULT_FOLDER"], filename)
 
 
-if __name__ == "__main__":
-    app.run(debug=True)
+# if __name__ == "__main__":
+#     app.run(debug=True)
+
+# Mangum to run on AWS Lambda
+handler = Mangum(app)  # Important: This is the Lambda handler

@@ -29,7 +29,12 @@ Install cv2 and streamlit, then do
 Go to http://localhost:8501/
 
 
-
+### SAM deployment
+- Build a lambda layer for opencv-headless on Cloudshell, and save it to s3 (size limitations). Then create a lambda layer
+- Install aws-cli and sam-cli, for deploying flask application to aws lambda
+- Do 'sam build' in the flask app main directory
+- Configure aws cli, and create a new profile
+- Then do 'sam deploy --guided --profile myprofile --region <region>'
 
 
 

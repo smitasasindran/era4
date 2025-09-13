@@ -1,0 +1,21 @@
+# AWS SAM deployment template file
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+  FlaskFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: flask_app.handler # Change here
+      Runtime: python3.12
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 30
+      Layers:
+        - arn:aws:lambda:ap-south-1:102507572752:layer:opencv-headless-py312:1
+      Events:
+        FlaskApi:
+          Type: Api
+          Properties:
+            Path: /
+            Method: ANY
