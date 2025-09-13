@@ -7,6 +7,53 @@ from glob import glob
 # Helper Functions
 # -------------------------------
 
+def background_extraction(input_path, input_type):
+    """
+    Static background extraction for image_dir or video_file mode.
+    Returns final result image (OpenCV image).
+    """
+    if input_type == "image_dir":
+        images = load_images_from_directory(input_path)
+    elif input_type == "video_file":
+        images = sample_video_frames(input_path, fps=1)
+    else:
+        raise ValueError("Unsupported static input_type")
+
+    if not images:
+        raise ValueError("No images found for processing")
+
+    background = estimate_background_batch(images, method="median", alpha=0.01)
+
+    # Use the last frame for foreground mask extraction
+    last_frame = images[-1]
+    mask = get_foreground_mask(last_frame, background)
+
+    # Apply mask to get foreground
+    result = cv2.bitwise_and(last_frame, last_frame, mask=mask)
+    return background  # Return final result (as OpenCV image)
+
+
+def background_extraction_frame(frame):
+    """
+    Real-time per-frame background extraction for RTSP mode.
+    Returns the processed frame.
+    """
+    # Simple running average background estimation (could be improved)
+    if not hasattr(background_extraction_frame, "bg_float"):
+        background_extraction_frame.bg_float = frame.astype(np.float32)
+
+    # Update background model with running average
+    alpha = 0.01
+    cv2.accumulateWeighted(frame, background_extraction_frame.bg_float, alpha)
+    background = cv2.convertScaleAbs(background_extraction_frame.bg_float)
+
+    mask = get_foreground_mask(frame, background)
+
+    # Apply mask to get foreground
+    result = cv2.bitwise_and(frame, frame, mask=mask)
+    return background
+
+
 def estimate_background_batch(images, method="median", threshold=30, alpha=0.01, refine_iters=20):
     """
     Estimate background from a batch of images with initialization + refinement.
@@ -40,25 +87,6 @@ def estimate_background_batch(images, method="median", threshold=30, alpha=0.01,
     background = cv2.convertScaleAbs(bg_float)
 
     return background
-
-
-
-# def initialize_background_from_batch(images):
-#     """Estimate background using median of a batch of images."""
-
-#     # Stack images along a new axis
-#     stack = np.stack(images, axis=3)  # shape: (H, W, C, N)
-
-#     # Compute median along the time axis (axis=3)
-#     background = np.median(stack, axis=3).astype(np.uint8)
-
-#     # return np.median(np.stack(images, axis=3), axis=3).astype(np.uint8)
-
-#     #fgbg = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=50, detectShadows=True)
-
-#     return background
-
-
 
 
 def refine_mask(mask, kernel_size=5, iterations=2):
