@@ -164,5 +164,5 @@ def result_file(filename):
 # if __name__ == "__main__":
 #     app.run(debug=True)
 
-# Mangum to run on AWS Lambda
-handler = Mangum(app)  # Important: This is the Lambda handler
+# Mangum to run on AWS Lambda. # Disable lifespan to avoid Flask 2.3+ TypeError
+handler = Mangum(app, lifespan="off") # Important: This is the Lambda handler
