@@ -17,12 +17,9 @@ app.config["RESULT_FOLDER"] = "static/results"
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 os.makedirs(app.config["RESULT_FOLDER"], exist_ok=True)
 
-rtsp_frame = None
-rtsp_lock = threading.Lock()
 rtsp_thread = None
-
-frame_queue = queue.Queue(maxsize=1)  # Keeps only latest frame
 rtsp_stop_event = threading.Event()
+frame_queue = queue.Queue(maxsize=1)  # Keeps only latest frame
 
 
 def rtsp_processing(rtsp_url):
@@ -32,6 +29,7 @@ def rtsp_processing(rtsp_url):
         return
 
     count = 0
+    print("[Info] RTSP processing started.")
 
     while not rtsp_stop_event.is_set():
         ret, frame = cap.read()
@@ -47,6 +45,7 @@ def rtsp_processing(rtsp_url):
             count = 0
             print(f"Processed 1000 frames!")
 
+        # Keep only the latest frame in the queue
         if not frame_queue.empty():
             try:
                 frame_queue.get_nowait()
@@ -145,6 +144,7 @@ def stream():
 def stop_stream():
     global rtsp_stop_event, rtsp_thread
 
+    print("[Info] Received stop_stream request.")
     rtsp_stop_event.set()
     rtsp_thread = None  # Clear thread reference
     return "Stream stopped", 200
