@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Background Extraction</title>
+</head>
+<body>
+    <h1>Upload Input</h1>
+    <form method="POST" enctype="multipart/form-data">
+        <label>Select Input Type:</label>
+        <select name="input_type" id="input_type" onchange="toggleInputs()">
+            <option value="image_dir">Image Directory</option>
+            <option value="video_file">Video File</option>
+            <option value="rtsp">RTSP Stream</option>
+        </select>
+        <br><br>
+
+        <div id="image_dir_input">
+            <label>Image Directory Path:</label>
+            <input type="text" name="image_dir">
+        </div>
+
+        <div id="video_file_input" style="display:none;">
+            <label>Upload Video:</label>
+            <input type="file" name="video_file">
+        </div>
+
+        <div id="rtsp_input" style="display:none;">
+            <label>RTSP URL:</label>
+            <input type="text" name="rtsp_url">
+        </div>
+
+        <br><button type="submit">Run Extraction</button>
+    </form>
+
+    <script>
+        function toggleInputs() {
+            var type = document.getElementById("input_type").value;
+            document.getElementById("image_dir_input").style.display = (type === "image_dir") ? "block" : "none";
+            document.getElementById("video_file_input").style.display = (type === "video_file") ? "block" : "none";
+            document.getElementById("rtsp_input").style.display = (type === "rtsp") ? "block" : "none";
+        }
+    </script>
+</body>
+</html>

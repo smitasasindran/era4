@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Result</title>
+</head>
+<body>
+    <h1>Background Extraction Result</h1>
+    <img src="{{ url_for('result_file', filename=filename) }}" alt="Result Image" style="max-width:100%;">
+    <br><br>
+    <a href="{{ url_for('index') }}">Run Again</a>
+</body>
+</html>
