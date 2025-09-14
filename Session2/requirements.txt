@@ -1,2 +1,6 @@
-Flask<2.3
+#Flask<2.3
+Flask
 mangum
+#aws-wsgi
+asgiref
+Werkzeug

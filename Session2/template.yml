@@ -6,7 +6,7 @@ Resources:
   FlaskFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: flask_app.handler # Change here
+      Handler: asgi_app.handler # Change here
       Runtime: python3.12
       CodeUri: .
       MemorySize: 256

@@ -7,7 +7,6 @@ import threading
 from flask import Flask, render_template, request, Response, redirect, url_for, send_from_directory
 from werkzeug.utils import secure_filename
 import queue
-from mangum import Mangum
 from background_creator import background_extraction, background_extraction_frame
 
 app = Flask(__name__)
@@ -164,5 +163,8 @@ def result_file(filename):
 # if __name__ == "__main__":
 #     app.run(debug=True)
 
-# Mangum to run on AWS Lambda. # Disable lifespan to avoid Flask 2.3+ TypeError
-handler = Mangum(app, lifespan="off") # Important: This is the Lambda handler
+# @app.route("/")
+# def index():
+#     print("Came here!")
+#     return {"message": "Greetings, Earthlings!!"}
+

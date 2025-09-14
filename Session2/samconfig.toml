@@ -1,0 +1,12 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "sam-erav4-background-extractor-app"
+resolve_s3 = true
+s3_prefix = "sam-erav4-background-extractor-app"
+region = "ap-south-1"
+profile = "smita-personal"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+disable_rollback = true
+image_repositories = []
