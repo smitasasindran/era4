@@ -13,10 +13,10 @@ The best model from session 4 experiments was under 20K parameters, so the same 
 
 |#  | Changes	                                                | Model Params	|  Train accuracy |	Test Accuracy |	Notebook | Notes |
 |--| ------------------------------------------------------- | -------- | --------- | --------- | ---------- | ------- |
-|1. | Ran best session4 model with 20 epochs, without batchnorm, dropout or GAP | 17,490 |	99.01 |	99.19 | [Iteration1]() | Can get better. Has a FC layer |
-|2. | Added batchnorm  | 17,666	| 99.49 |	99.42 | [Iteration2]() | Slight overfitting observed |
-|3. | Changed to Adam optimizer | 17,666 |	99.45 |	99.44 | [Iteration3]() | Still overfitting |
-|4. | Added dropout to one cnn layer with highest parameter (conv3 with 4k params), switched back to SGD | 17,666 |	99.4 |	99.47 | Did not make much difference |     
+|1. | Ran best session4 model with 20 epochs, without batchnorm, dropout or GAP | 17,490 |	99.01 |	99.19 | [Iteration1](https://github.com/smitasasindran/era4/blob/master/Session5/ERA4_Session_5_Iteration1.ipynb) | Can get better. Has a FC layer |
+|2. | Added batchnorm  | 17,666	| 99.49 |	99.42 | [Iteration2](https://github.com/smitasasindran/era4/blob/master/Session5/ERA4_Session_5_Iteration2.ipynb) | Slight overfitting observed |
+|3. | Changed to Adam optimizer | 17,666 |	99.45 |	99.44 | [Iteration3](https://github.com/smitasasindran/era4/blob/master/Session5/ERA4_Session_5_Iteration3.ipynb) | Still overfitting |
+|4. | Added dropout to one cnn layer with highest parameter (conv3 with 4k params), switched back to SGD | 17,666 |	99.4 |	99.47 |[Iteration4](https://github.com/smitasasindran/era4/blob/master/Session5/ERA4_Session_5_Iteration4.ipynb) |  Did not make much difference |     
 
 
 
