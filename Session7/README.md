@@ -27,9 +27,10 @@ Iterative experiments are mentioned below:
 |1. | Initial - trying with a small basic model. Architecture: C1C2C3C40. No MaxPooling, has 1x1, GAP, no FC  | 34,136	|  68.64 |	67.75 | [Iniital](https://github.com/smitasasindran/era4/blob/session7/Session7/ERA4_Session7_Iteration1.ipynb)	  | 
 |2. | Updated model architecture - Added more kernels, but same architecture as before  | 134,320 | 80.69 |	78.66 | [Iteration2](https://github.com/smitasasindran/era4/blob/session7/Session7/ERA4_Session7_Iteration2.ipynb)  |
 |3. | Added Depthwise Separable Conv, Dilated Conv, RF=45  | 99,408 |	86.76 |	85.49 | [Iteration3](https://github.com/smitasasindran/era4/blob/session7/Session7/ERA4_Session7_Iteration3.ipynb) |
-|4. | Added albumentations transforms | 99408 |	83.90 |	85.40 | [Iteration3](https://github.com/smitasasindran/era4/blob/master/Session4/ERA4_Session_4_Iteration4.ipynb) |
+|4. | Added albumentations transforms | 99408 |	83.90 |	85.40 | [Iteration4](https://github.com/smitasasindran/era4/blob/master/Session7/ERA4_Session7_Iteration4.ipynb) |
 |5. | Moved to modular code | 99408 |	83.70 |	85.03 | [Final](https://github.com/smitasasindran/era4/blob/session7/Session7/ERA4_Session7_Final.ipynb) |
 
 
 
 #### 3. Best Architecture
+
