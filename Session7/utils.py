@@ -1,15 +1,10 @@
 import torch
-# import torch.nn as nn
 import torch.nn.functional as F
 # import torch.optim as optim
-# import torchvision
-from torchvision import datasets, transforms
-# import numpy as np
-import albumentations as A
+
 from torchsummary import summary
-
 from tqdm import tqdm
-
+import matplotlib.pyplot as plt
 
 def init_setup():
     SEED = 1
@@ -24,30 +19,6 @@ def init_setup():
     if cuda:
         torch.cuda.manual_seed(SEED)
     return cuda
-
-
-def create_transformations():
-    # Train Phase transformations
-    train_transforms = transforms.Compose([
-        # A.HorizontalFlip(p=0.5),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.4914, 0.4822, 0.4465), std=(0.2470, 0.2435, 0.2616))
-    ])
-
-    # Test Phase transformations
-    test_transforms = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.4914, 0.4822, 0.4465), std=(0.2470, 0.2435, 0.2616))
-    ])
-
-    return train_transforms, test_transforms
-
-
-def load_dataset(train_transforms, test_transforms):
-    train = datasets.CIFAR10('./data', train=True, download=True, transform=train_transforms)
-    test = datasets.CIFAR10('./data', train=False, download=True, transform=test_transforms)
-    return train, test
 
 
 def get_dataloaders(train, test, cuda, batch_size=128):
@@ -133,3 +104,17 @@ def test(model, device, test_loader, test_losses, test_acc):
     test_acc.append(100. * correct / len(test_loader.dataset))
 
     return test_losses, test_acc
+
+
+def plot_graphs(train_losses, train_acc, test_losses, test_acc):
+    t = [t_items.item() for t_items in train_losses]
+
+    fig, axs = plt.subplots(2, 2, figsize=(15, 10))
+    axs[0, 0].plot(t)
+    axs[0, 0].set_title("Training Loss")
+    axs[1, 0].plot(train_acc)
+    axs[1, 0].set_title("Training Accuracy")
+    axs[0, 1].plot(test_losses)
+    axs[0, 1].set_title("Test Loss")
+    axs[1, 1].plot(test_acc)
+    axs[1, 1].set_title("Test Accuracy")

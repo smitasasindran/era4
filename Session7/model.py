@@ -5,7 +5,6 @@ import torch.nn.functional as F
 
 dropout_value = 0.1
 
-
 #https://github.com/seungjunlee96/Depthwise-Separable-Convolution_Pytorch
 def depthwise_separable_layer(nin, nout, dropout_value, padding=0):
     depthwise = nn.Conv2d(nin, nin, kernel_size=3, padding=padding, groups=nin, bias=False)
@@ -147,7 +146,7 @@ class Net(nn.Module):
         #     nn.ReLU(),
         #     nn.BatchNorm2d(64),
         #     nn.Dropout(dropout_value)
-        # ) # output_size = 6
+        # ) # output_size = 3
 
 
         # Output
@@ -161,7 +160,6 @@ class Net(nn.Module):
             # nn.Dropout(dropout_value)
             # nn.ReLU()
         ) # output_size = 10, rf=45
-
 
 
     def forward(self, x):
