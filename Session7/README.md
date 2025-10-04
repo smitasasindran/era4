@@ -5,7 +5,8 @@
 Write a new network that: 
 
     1. works on CIFAR-10 Dataset
-    2. has the architecture to C1C2C3C40 (No MaxPooling, but convolutions, where the last one has a stride of 2 instead) (NO restriction on using 1x1) (If you can figure out how to use Dilated kernels here instead of MP or strided convolution, then 200pts extra!)
+    2. has the architecture to C1C2C3C40 (No MaxPooling, but convolutions, where the last one has a stride of 2 instead) 
+    (NO restriction on using 1x1) (If you can figure out how to use Dilated kernels here instead of MP or strided convolution, then 200pts extra!)
     3. total RF must be more than 44
     4. One of the layers must use Depthwise Separable Convolution
     5. One of the layers must use Dilated Convolution
@@ -13,13 +14,16 @@ Write a new network that:
     7. Use the albumentation library and apply:
        - horizontal flip
        - shiftScaleRotate
-       - coarseDropout (max_holes = 1, max_height=16px, max_width=16, min_holes = 1, min_height=16px, min_width=16px, fill_value=(mean of your dataset), mask_fill_value = None)
+       - coarseDropout (max_holes = 1, max_height=16px, max_width=16, min_holes = 1, min_height=16px, min_width=16px, 
+          fill_value=(mean of your dataset), mask_fill_value = None)
     8. achieve 85% accuracy, as many epochs as you want. Total Params to be less than 200k.
     9. Make sure you're following code-modularity (else 0 for full assignment) 
 
 
 #### 2. Experiments
 
+Experiments were run on colab and the final version was moved to python files because of update issues with the python files. 
+Training was done for 100 epochs. LR was set at 0.01.
 Iterative experiments are mentioned below:   
 
 |#  | Changes	                                                | Model Params	|  Train accuracy |	Test Accuracy |	Notebook | 
@@ -31,6 +35,13 @@ Iterative experiments are mentioned below:
 |5. | Moved to modular code | 99408 |	83.70 |	85.03 | [Final](https://github.com/smitasasindran/era4/blob/session7/Session7/ERA4_Session7_Final.ipynb) |
 
 
+*Observations*:
 
-#### 3. Best Architecture
+- Initial two models were overfitting a bit. These models were not well structured though, they did not hit the required RF and did not have a pooling layer
+- Model got better after restructuring a bit, and adding a strided convolution layer after the first convolution block. This iteration (#3) also had a depthwise separable layer, which reduced the number of parameters. This model was able to hit 85% test accuracy, but was still overfitting a bit. Only horizontal flip was added as augmentation.
+- This model also had padding in all layers of the first block to get a higher RF. For remaining convolution blocks, the first layer had padding but we could add it to more layers
+- 4th model includes albumentations transforms - cutout, horizontal flip and ShiftScaleRotate. Model is not overfitting anymore
+
+
+
 
