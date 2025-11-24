@@ -3,7 +3,7 @@
 
 #### 1. Requirements
 
-1. Attached is the input.txt Download input.txt file, and the code file
+1. Download the input.txt file 
 2. Download code file (for reference only, you can write your own code).  
 On Colab (or your computer), train a decoder only 124M or more model on this such that your loss is less than 0.099999
 3. Share the GitHub link where we can see the training logs and sample outputs.
@@ -12,15 +12,15 @@ On Colab (or your computer), train a decoder only 124M or more model on this suc
 
 #### 2. Training params
 
-BATCH_SIZE = 8
-TOKEN_SIZE = 512
-lr = 0.0005
+BATCH_SIZE = 8  
+TOKEN_SIZE = 512  
+lr = 0.0005  
 
-Optimizer: AdamW
-Scheduler: LR with Cosine Annealing
+Optimizer: AdamW  
+Scheduler: LR with Cosine Annealing   
 
-EPOCHS = 70
-warmup_epochs = 30
+EPOCHS = 70  
+warmup_epochs = 30  
 
 
 #### 3. Training logs (Truncated)
