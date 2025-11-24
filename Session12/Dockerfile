@@ -5,6 +5,7 @@ FROM python:3.11.2-slim-bullseye
 RUN pip install streamlit
 RUN pip install opencv-python-headless && pip install Pillow
 RUN pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+RUN pip install tiktoken
 
 ADD . /minigpt2_shakespeare
 WORKDIR /minigpt2_shakespeare
