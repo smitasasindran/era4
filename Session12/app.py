@@ -10,7 +10,7 @@ st.set_page_config(page_title="Mini GPT2 Text Generator", layout="centered")
 st.title("🧠 Mini GPT2")
 st.write("Generate Shakespearean text")
 
-
+print(f"Starting app")
 
 @st.cache_resource
 def load_model(weights_file, device="cpu"):
@@ -24,6 +24,8 @@ def load_model(weights_file, device="cpu"):
 
 weights_file = "gpt2-shakespeare-S12.pth"
 model = load_model(weights_file)
+print(f"Loaded Gpt2 model")
+# st.info(f"Loaded gpt2 model")
 
 # Some batch and token size
 B = 1
@@ -32,6 +34,7 @@ T = 32
 
 def run_inference():
     print(f"Generating some text")
+    # st.info(f"Generating some text")
     max_length = 50
 
     # input_text = st.session_state['input_text']
@@ -72,26 +75,23 @@ def run_inference():
     print(f"output size: {x.size()}")
     outputs = [enc.decode(out.tolist()) for out in x]
     print(f"Outputs are: {outputs}")
+    # st.info(f"Outputs are: {outputs}")
     output_str = "".join(outputs)
-    st.session_state['text_content'] = output_str
+    st.session_state['output_text'] = output_str
+    # st.info(f"Current text in session state: {st.session_state['output_text']}")
 
-    # else:
-    #     st.session_state['text_content'] = "Greetings, Earthlings!"
 
 # -----------------------------
 # Streamlit UI
 # -----------------------------
 col1, col2 = st.columns([1, 2])
 
-# my_area =  st.text_area(":blue[My text here :]",height=2000)
-
-if 'text_content' not in st.session_state:
-    st.session_state['text_content'] = ""
+if 'output_text' not in st.session_state:
+    st.session_state['output_text'] = ""
 
 
 with col1:
-    # user_input = st.text_area("**Enter text**", key="input_text", height=200)
     generate_button = st.button("Generate Text", on_click=run_inference)
 
 with col2:
-    generate_output = st.text_area("**Response**", key="output_text", height=300, value=st.session_state['text_content'])
+    generate_output = st.text_area("**Response**", key="output_text", height=300)
