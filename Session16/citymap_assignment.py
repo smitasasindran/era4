@@ -35,6 +35,7 @@ import math
 import numpy as np
 import random
 from collections import deque
+import logging
 
 # --- PYTORCH ---
 import torch
@@ -108,6 +109,14 @@ TARGET_COLORS = [
     QColor(150, 255, 50),     # Lime
     QColor(255, 255, 0),      # Yellow
 ]
+
+# Configure basic logging settings
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger(__name__)
 
 # ==========================================
 # 2. NEURAL NETWORK
@@ -667,6 +676,7 @@ class NeuralNavApp(QMainWindow):
         self.log_console.append(msg)
         sb = self.log_console.verticalScrollBar()
         sb.setValue(sb.maximum())
+        logger.info(msg)
 
     def setup_map(self, path):
         if not os.path.exists(path):
