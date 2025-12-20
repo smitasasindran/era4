@@ -36,6 +36,7 @@ import numpy as np
 import random
 from collections import deque
 import logging
+import time
 
 # --- PYTORCH ---
 import torch
@@ -72,9 +73,9 @@ CAR_WIDTH = 14
 CAR_HEIGHT = 8   
 SENSOR_DIST = 15  #20  # FIX ME! Distance sensors look ahead (pixels) - 1000 Currently unrealistic!
 SENSOR_ANGLE = 15    # FIX ME! Angle spread of sensors (degrees) - 5 Too narrow! -- not used
-SPEED = 1          # FIX ME! Forward speed (pixels/step) - 50 Way too fast!
+SPEED = 2          # FIX ME! Forward speed (pixels/step) - 50 Way too fast!
 TURN_SPEED = 3    # FIX ME! Regular turn angle (degrees/step) - 0.1 Too slow!
-SHARP_TURN = 15      # FIX ME! Sharp turn angle for tight corners (degrees) - 5 Too small!
+SHARP_TURN = 10      # FIX ME! Sharp turn angle for tight corners (degrees) - 5 Too small!
 
 # ==========================================
 # REINFORCEMENT LEARNING HYPERPARAMETERS - FIX ME!
@@ -86,15 +87,15 @@ GAMMA = 0.9        # FIX ME! Discount factor for future rewards (0 to 1)
                     # 0.01 Too low - agent won't care about future!
                     # Hint: Usually 0.9-0.99
 
-LR = 0.0001            # FIX ME! Learning rate for neural network optimizer
+LR = 0.001            # FIX ME! Learning rate for neural network optimizer
                     # 1,0 Way too high - will cause instability!
                     # Hint: Usually 0.0001 to 0.01
 
-TAU = 0.01           # FIX ME! Polyak averaging coefficient for soft target updates
+TAU = 0.001           # FIX ME! Polyak averaging coefficient for soft target updates
                     # 0.9 Too high - defeats the purpose of target network!
                     # Hint: Usually 0.001 to 0.01
 
-MAX_CONSECUTIVE_CRASHES = 10  # FIX ME! Reset after this many crashes
+MAX_CONSECUTIVE_CRASHES = 2  # FIX ME! Reset after this many crashes
                                # 100 Too high - will waste time on bad configs
                                # Hint: Usually 2-10
 
@@ -195,6 +196,9 @@ class CarBrain:
             self.target_pos = self.targets[0]
         state, dist = self.get_state()
         self.prev_dist = dist
+        logger.info(f"\n\nIn reset: sensor_vals={state[:7]}, norm_angle={state[7]}, norm_dist={state[8]}")
+        logger.info(f"In reset: dist={dist}, car_angle={self.car_angle}, car_pos={self.car_pos}\n")
+
         return state
     
     def add_target(self, point):
@@ -242,7 +246,7 @@ class CarBrain:
         
         norm_dist = min(dist / 800.0, 1.0)
         norm_angle = angle_diff / 180.0
-        
+
         state = sensor_vals + [norm_angle, norm_dist]
         return np.array(state, dtype=np.float32), dist
 
@@ -258,18 +262,23 @@ class CarBrain:
             turn = -SHARP_TURN
         elif action == 4: # Sharp right turn
             turn = SHARP_TURN
-        
+
+        logger.info(f"\n\nIn step: action={action}, turn={turn}")
         self.car_angle += turn
         rad = math.radians(self.car_angle)
         
         new_x = self.car_pos.x() + math.cos(rad) * SPEED
         new_y = self.car_pos.y() + math.sin(rad) * SPEED
         self.car_pos = QPointF(new_x, new_y)
-        
+
         next_state, dist = self.get_state()
+        logger.info(f"In step after get_state: sensor_vals={next_state[:7]}, norm_angle={next_state[7]}, norm_dist={next_state[8]}")
+        logger.info(f"In step after get_state: dist={dist}, car_angle={self.car_angle}, car_pos={self.car_pos}")
+
         sensors = next_state[:7]
         
-        reward = -0.1
+        # reward = -0.1
+        reward = -0.05 # Reducing step penalty
         done = False
         
         car_center_val = self.check_pixel(self.car_pos.x(), self.car_pos.y())
@@ -288,12 +297,30 @@ class CarBrain:
             else:
                 done = True
         else:
-            reward += (1.0 - next_state[4]) * 20
-            if self.prev_dist is not None and dist > self.prev_dist:
-                reward -= 10
+            # reward += (1.0 - next_state[4]) * 20
+            # if self.prev_dist is not None and dist > self.prev_dist:
+            #     reward -= 10
+
+            # 1. Progress toward target (MAIN REWARD)
+            # Penalize if car moves away from goal, and reward if moving closer to goal
+            if self.prev_dist is not None:
+                delta = self.prev_dist - dist
+                reward += delta * 1.5 # positive if moving closer
+                logger.info(f"In step: delta_dist={delta:.3f}, reward={reward:.3f}")
+
+            # 2. Obstacle avoidance (SOFT penalty)
+            # Sensor values are brightness levels of that sensor. 0=black, 1=white. The roads on the map are white,
+            # therefore low brightness means obstacle, and high brghtness means road. Either reward high brigntness,
+            # or penalise closeness to obstacle
+            min_sensor = min(sensors)
+            reward -= (1.0 - min_sensor) * 0.8 # penalizing obstacle close to any sensor
+            # reward -= max(0.0, 0.6 - min_sensor) * 0.8 # map isn't black&white
+
             self.prev_dist = dist
             
         self.score += reward
+        logger.info(f"In step: Reward={reward}, total score={self.score}")
+        # time.sleep(1)
         return next_state, reward, done
 
     def check_pixel(self, x, y):
@@ -345,6 +372,7 @@ class CarBrain:
         self.optimizer.step()
         
         if self.epsilon > 0.001: self.epsilon *= 0.9995
+        logger.info(f"In optimize: loss={loss.item()}, epsilon={self.epsilon}")
         return loss.item()
     
     def store_experience(self, experience):
