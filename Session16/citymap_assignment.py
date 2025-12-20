@@ -73,21 +73,21 @@ CAR_WIDTH = 14
 CAR_HEIGHT = 8   
 SENSOR_DIST = 15  #20  # FIX ME! Distance sensors look ahead (pixels) - 1000 Currently unrealistic!
 SENSOR_ANGLE = 15    # FIX ME! Angle spread of sensors (degrees) - 5 Too narrow! -- not used
-SPEED = 2          # FIX ME! Forward speed (pixels/step) - 50 Way too fast!
+SPEED = 1          # FIX ME! Forward speed (pixels/step) - 50 Way too fast!
 TURN_SPEED = 3    # FIX ME! Regular turn angle (degrees/step) - 0.1 Too slow!
 SHARP_TURN = 10      # FIX ME! Sharp turn angle for tight corners (degrees) - 5 Too small!
 
 # ==========================================
 # REINFORCEMENT LEARNING HYPERPARAMETERS - FIX ME!
 # ==========================================
-BATCH_SIZE = 256      # FIX ME! Number of experiences sampled per training step - 2 Too small!
+BATCH_SIZE = 128      # FIX ME! Number of experiences sampled per training step - 2 Too small!
                     # Hint: Typically 32-512 for stability
 
-GAMMA = 0.9        # FIX ME! Discount factor for future rewards (0 to 1)
+GAMMA = 0.99        # FIX ME! Discount factor for future rewards (0 to 1)
                     # 0.01 Too low - agent won't care about future!
                     # Hint: Usually 0.9-0.99
 
-LR = 0.001            # FIX ME! Learning rate for neural network optimizer
+LR = 0.0003            # FIX ME! Learning rate for neural network optimizer
                     # 1,0 Way too high - will cause instability!
                     # Hint: Usually 0.0001 to 0.01
 
