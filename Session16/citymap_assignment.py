@@ -247,6 +247,9 @@ class CarBrain:
         norm_dist = min(dist / 800.0, 1.0)
         norm_angle = angle_diff / 180.0
 
+        # target_progress = self.current_target_idx / max(len(self.targets) - 1, 1) # 0, 0.33, 0.66, 1 / 0, 0.5, 1
+        # target_progress = (self.current_target_idx + 1) / len(self.targets)  # 0.25, 0.5, 0.75, 1  / 0.33, 0.66, 1
+
         state = sensor_vals + [norm_angle, norm_dist]
         return np.array(state, dtype=np.float32), dist
 
@@ -291,11 +294,13 @@ class CarBrain:
             reward = 100
             has_next = self.switch_to_next_target()
             if has_next:
+                # reward += 20
                 done = False
                 _, new_dist = self.get_state()
                 self.prev_dist = new_dist
             else:
                 done = True
+                reward += 100
         else:
             # reward += (1.0 - next_state[4]) * 20
             # if self.prev_dist is not None and dist > self.prev_dist:
@@ -332,7 +337,7 @@ class CarBrain:
     def optimize(self):
         total_memory_size = len(self.memory) + len(self.priority_memory)
         if total_memory_size < BATCH_SIZE: return 0
-        
+
         success_rate = len(self.priority_memory) / max(total_memory_size, 1)
         priority_ratio = 0.3 + (success_rate * 0.4)
         
