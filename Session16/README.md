@@ -52,10 +52,3 @@ With the new map which had a lot more sharp angles, the turn angle had to be inc
 - Adding another FC layer to DriverDNN
 Didn't make a noticable difference
 
-
-2.6: Tuning for mid-targets (Multiple optimizations)   
-
-
-2.x 
-
-*Observations*:
