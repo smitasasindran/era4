@@ -75,7 +75,7 @@ SENSOR_DIST = 15  #20  # FIX ME! Distance sensors look ahead (pixels) - 1000 Cur
 SENSOR_ANGLE = 15    # FIX ME! Angle spread of sensors (degrees) - 5 Too narrow! -- not used
 SPEED = 1          # FIX ME! Forward speed (pixels/step) - 50 Way too fast!
 TURN_SPEED = 3    # FIX ME! Regular turn angle (degrees/step) - 0.1 Too slow!
-SHARP_TURN = 10      # FIX ME! Sharp turn angle for tight corners (degrees) - 5 Too small!
+SHARP_TURN = 17      # FIX ME! Sharp turn angle for tight corners (degrees) - 5 Too small!
 
 # ==========================================
 # REINFORCEMENT LEARNING HYPERPARAMETERS - FIX ME!
@@ -133,6 +133,8 @@ class DrivingDQN(nn.Module):
             nn.Linear(256, 256),
             nn.ReLU(),
             nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
             nn.ReLU(),
             nn.Linear(128, output_dim)
         )
@@ -318,6 +320,8 @@ class CarBrain:
             # therefore low brightness means obstacle, and high brghtness means road. Either reward high brigntness,
             # or penalise closeness to obstacle
             min_sensor = min(sensors)
+            # min_sensor = min(sensors[2:5])
+            # logger.info(f"Mid 3 sensors: {sensors[2:5]}, min={min_sensor}")
             reward -= (1.0 - min_sensor) * 0.8 # penalizing obstacle close to any sensor
             # reward -= max(0.0, 0.6 - min_sensor) * 0.8 # map isn't black&white
 
@@ -692,7 +696,8 @@ class NeuralNavApp(QMainWindow):
         main_layout.addWidget(self.view)
 
         # Logic
-        self.setup_map("city_map.png") 
+        # self.setup_map("city_map.png")
+        self.setup_map("maps/6201696720186444610.jpg")
         self.setup_state = 0 
         self.sim_timer = QTimer()
         self.sim_timer.timeout.connect(self.game_loop)

@@ -45,6 +45,14 @@ After these changes, the model training was faster, and it hit all targets corre
 2.5: Final Reward  
 Earlier, each target was getting a high reward of 100. The model then treats all targets the same, so it does not consider the final target to be the end goal and goes on longer routes especially from 2nd to 3rd target. Now another large reward (+100) is added when final target is reached. The Target A->B->C route is now repeated very frequently
 
+2.6: Assignment requirements:
+- Trying with different maps
+The previous tests were done with a circular map, which did not have a lot of sharp angles. So a turn angle of 10 degrees was not sufficient.
+With the new map which had a lot more sharp angles, the turn angle had to be increased.
+- Adding another FC layer to DriverDNN
+Didn't make a noticable difference
+
+
 2.6: Tuning for mid-targets (Multiple optimizations)   
 
 
