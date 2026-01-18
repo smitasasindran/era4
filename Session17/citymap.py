@@ -8,6 +8,7 @@ from collections import deque
 # --- PYTORCH ---
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 
 # --- PYQT ---
@@ -64,6 +65,56 @@ TARGET_COLORS = [
 # ==========================================
 # 2. NEURAL NETWORK
 # ==========================================
+
+class Actor(nn.Module):
+
+  def __init__(self, state_dim, action_dim, max_action):
+    super(Actor, self).__init__()
+    self.layer_1 = nn.Linear(state_dim, 400)
+    self.layer_2 = nn.Linear(400, 300)
+    self.layer_3 = nn.Linear(300, action_dim)
+    self.max_action = max_action
+
+  def forward(self, x):
+    x = F.relu(self.layer_1(x))
+    x = F.relu(self.layer_2(x))
+    x = self.max_action * torch.tanh(self.layer_3(x))
+    return x
+
+
+class Critic(nn.Module):
+
+  def __init__(self, state_dim, action_dim):
+    super(Critic, self).__init__()
+    # Defining the first Critic neural network
+    self.layer_1 = nn.Linear(state_dim + action_dim, 400)
+    self.layer_2 = nn.Linear(400, 300)
+    self.layer_3 = nn.Linear(300, 1)
+    # Defining the second Critic neural network
+    self.layer_4 = nn.Linear(state_dim + action_dim, 400)
+    self.layer_5 = nn.Linear(400, 300)
+    self.layer_6 = nn.Linear(300, 1)
+
+  def forward(self, x, u):
+    xu = torch.cat([x, u], 1)
+    # Forward-Propagation on the first Critic Neural Network
+    x1 = F.relu(self.layer_1(xu))
+    x1 = F.relu(self.layer_2(x1))
+    x1 = self.layer_3(x1)
+    # Forward-Propagation on the second Critic Neural Network
+    x2 = F.relu(self.layer_4(xu))
+    x2 = F.relu(self.layer_5(x2))
+    x2 = self.layer_6(x2)
+    return x1, x2
+
+  def Q1(self, x, u):
+    xu = torch.cat([x, u], 1)
+    x1 = F.relu(self.layer_1(xu))
+    x1 = F.relu(self.layer_2(x1))
+    x1 = self.layer_3(x1)
+    return x1
+
+
 class DrivingDQN(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(DrivingDQN, self).__init__()
@@ -90,11 +141,28 @@ class CarBrain:
         
         # RL Init
         self.input_dim = 9  # 7 sensors + angle_to_target + distance_to_target
-        self.n_actions = 5  # 0: left, 1: straight, 2: right, 3: sharp left, 4: sharp right 
-        self.policy_net = DrivingDQN(self.input_dim, self.n_actions)
-        self.target_net = DrivingDQN(self.input_dim, self.n_actions)
-        self.target_net.load_state_dict(self.policy_net.state_dict())
-        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=LR)
+        # self.n_actions = 5  # 0: left, 1: straight, 2: right, 3: sharp left, 4: sharp right
+        # self.n_actions = 2 # Turn angle, speed
+        # self.policy_net = DrivingDQN(self.input_dim, self.n_actions)
+        # self.target_net = DrivingDQN(self.input_dim, self.n_actions)
+        # # self.target_net.load_state_dict(self.policy_net.state_dict())
+        # self.optimizer = optim.Adam(self.policy_net.parameters(), lr=LR)
+
+        # max_action = float(env.action_space.high[0])
+        self.action_dim = 1 # # Turn angle, speed. Starting with just speed
+        self.max_action = 1.0
+
+        self.actor = Actor(self.input_dim, self.action_dim, self.max_action)        # model that gets back propagated
+        self.actor_target = Actor(self.input_dim, self.action_dim, self.max_action)       # actor target model that will be updated by polyak averaging
+        self.actor_target.load_state_dict(self.actor.state_dict())
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=LR)
+
+        # Critics - both critics are inside one network and will be trained together
+        self.critic = Critic(self.input_dim, self.action_dim)
+        self.critic_target = Critic(self.input_dim, self.action_dim)    # critic targets that gets updated ny polyak averaging
+        self.critic_target.load_state_dict(self.critic.state_dict())
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=LR)
+
         self.memory = deque(maxlen=10000)
         
         # Prioritized Replay: separate buffer for high-reward episodes
@@ -103,7 +171,7 @@ class CarBrain:
         self.episode_scores = deque(maxlen=100)  # Track recent episode scores
         
         self.steps = 0
-        self.epsilon = 0.5
+        # self.epsilon = 0.5
         self.consecutive_crashes = 0  # Track consecutive crashes for early stopping
         
         # Locations
@@ -193,6 +261,7 @@ class CarBrain:
         return np.array(state, dtype=np.float32), dist
 
     def step(self, action):
+        # ToDo Smita: Change action 
         turn = 0
         if action == 0:   # Left turn
             turn = -TURN_SPEED
@@ -293,24 +362,60 @@ class CarBrain:
             return 0
         
         s, a, r, ns, d = zip(*batch)
-        s = torch.FloatTensor(np.array(s))
-        a = torch.LongTensor(a).unsqueeze(1)
-        r = torch.FloatTensor(r).unsqueeze(1)
-        ns = torch.FloatTensor(np.array(ns))
-        d = torch.FloatTensor(d).unsqueeze(1)
-        
-        q = self.policy_net(s).gather(1, a)
-        next_q = self.target_net(ns).max(1)[0].detach().unsqueeze(1)
-        target = r + GAMMA * next_q * (1 - d)
-        
-        loss = nn.MSELoss()(q, target)
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-        
-        if self.epsilon > 0.001: self.epsilon *= 0.9995
-        return loss.item()
-    
+        state = torch.FloatTensor(np.array(s))
+        action = torch.FloatTensor(a).unsqueeze(1)
+        reward = torch.FloatTensor(r).unsqueeze(1)
+        next_state = torch.FloatTensor(np.array(ns))
+        done = torch.FloatTensor(d).unsqueeze(1)
+
+        # # ToDo Smita: Change policy_net and target_net
+        # q = self.policy_net(s).gather(1, a)
+        # next_q = self.target_net(ns).max(1)[0].detach().unsqueeze(1)
+        # target = r + GAMMA * next_q * (1 - d)
+        #
+        # loss = nn.MSELoss()(q, target)
+        # # self.optimizer.zero_grad()
+        # self.actor_optimizer.zero_grad()
+        # loss.backward()
+        # # self.optimizer.step()
+        # self.actor_optimizer.step()
+        #
+        # if self.epsilon > 0.001: self.epsilon *= 0.9995
+        # return loss.item()
+
+        with torch.no_grad():
+            noise = (torch.randn_like(action) * 0.2).clamp(-0.5, 0.5)
+            next_action = (self.actor_target(next_state) + noise) #.clamp(-1, 1)
+
+            target_Q1, target_Q2 = self.critic_target(next_state, next_action)
+            target_Q = torch.min(target_Q1, target_Q2)
+            target_Q = reward + (1 - done) * GAMMA * target_Q
+
+        # Critic loss - both critics learn independently
+        current_Q1, current_Q2 = self.critic(state, action)
+        critic_loss = nn.MSELoss()(current_Q1, target_Q) + nn.MSELoss()(current_Q2, target_Q)
+
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
+
+        # Delayed actor update
+        if self.steps % 2 == 0:
+            actor_loss = -self.critic.Q1(state, self.actor(state)).mean()
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            self.actor_optimizer.step()
+
+            # Soft updates
+            for p, tp in zip(self.actor.parameters(), self.actor_target.parameters()):
+                tp.data.copy_(TAU * p.data + (1 - TAU) * tp.data)
+
+            for p, tp in zip(self.critic.parameters(), self.critic_target.parameters()):
+                tp.data.copy_(TAU * p.data + (1 - TAU) * tp.data)
+
+        return critic_loss.item()
+
+
     def store_experience(self, experience):
         """Store experience in current episode buffer"""
         self.current_episode_buffer.append(experience)
@@ -342,6 +447,13 @@ class CarBrain:
         
         # Clear episode buffer for next episode
         self.current_episode_buffer = []
+
+    def load_model(self):
+        # Load saved model
+        pass
+
+    def save_model(self):
+        pass
 
 # ==========================================
 # 4. CUSTOM WIDGETS (VISUALS)
@@ -634,10 +746,10 @@ class NeuralNavApp(QMainWindow):
         sf_layout = QGridLayout(stats_frame)
         sf_layout.setContentsMargins(10, 10, 10, 10)
         
-        self.val_eps = QLabel("1.00")
-        self.val_eps.setStyleSheet(f"color: {C_ACCENT.name()}; font-weight: bold;")
-        sf_layout.addWidget(QLabel("Epsilon:"), 0,0)
-        sf_layout.addWidget(self.val_eps, 0,1)
+        # self.val_eps = QLabel("1.00")
+        # self.val_eps.setStyleSheet(f"color: {C_ACCENT.name()}; font-weight: bold;")
+        # sf_layout.addWidget(QLabel("Epsilon:"), 0,0)
+        # sf_layout.addWidget(self.val_eps, 0,1)
         
         self.val_rew = QLabel("0")
         self.val_rew.setStyleSheet(f"color: {C_ACCENT.name()}; font-weight: bold;")
@@ -780,6 +892,13 @@ class NeuralNavApp(QMainWindow):
         if event.key() == Qt.Key.Key_Space and self.setup_state == 2:
             self.btn_run.click()
 
+    def continuous_to_discrete(self, a):
+        if a < -0.5: return 3  # sharp left
+        if a < -0.1: return 0  # left
+        if a < 0.1: return 1  # straight
+        if a < 0.5: return 2  # right
+        return 4  # sharp right
+
     def game_loop(self):
         if self.setup_state != 2: return
 
@@ -788,18 +907,28 @@ class NeuralNavApp(QMainWindow):
         
         # Track current target index before step
         prev_target_idx = self.brain.current_target_idx
-        
-        if random.random() < self.brain.epsilon:
-            action = random.randint(0, 4)  # 5 actions: 0-4
-        else:
-            with torch.no_grad():
-                q = self.brain.policy_net(torch.FloatTensor(state).unsqueeze(0))
-                action = q.argmax().item()
+
+        # if random.random() < self.brain.epsilon:
+        #     action = random.randint(0, 4)  # 5 actions: 0-4
+        # else:
+        #     # ToDo Smita: pick action from actor? Replace policy_net
+        #     with torch.no_grad():
+        #         q = self.brain.policy_net(torch.FloatTensor(state).unsqueeze(0))
+        #         action = q.argmax().item()
+        with torch.no_grad():
+            a = self.brain.actor(torch.FloatTensor(state).unsqueeze(0)).item()
+
+        # Exploration noise
+        a += np.random.normal(0, 0.1)
+        a = np.clip(a, -1.0, 1.0)
+
+        action = self.continuous_to_discrete(a)
 
         next_s, rew, done = self.brain.step(action)
         
-        # Store experience in current episode buffer
-        self.brain.store_experience((state, action, rew, next_s, done))
+        # Store experience in current episode buffer. Instead of storing discrete action index, store continuous action:
+        # self.brain.store_experience((state, action, rew, next_s, done))
+        self.brain.store_experience((state, a, rew, next_s, done))
         self.brain.optimize()
         
         # Check if target switched
@@ -808,10 +937,11 @@ class NeuralNavApp(QMainWindow):
             total = len(self.brain.targets)
             self.log(f"<font color='#88C0D0'>🎯 Target {prev_target_idx + 1} reached! Moving to target {target_num}/{total}</font>")
         
-        # Soft target update (Polyak averaging) - every step
-        for target_param, policy_param in zip(self.brain.target_net.parameters(), 
-                                               self.brain.policy_net.parameters()):
-            target_param.data.copy_(TAU * policy_param.data + (1.0 - TAU) * target_param.data)
+        # # Soft target update (Polyak averaging) - every step
+        # # ToDo Smita: Add polyak averaging here for actor-critic. target_net and policy_net
+        # for target_param, policy_param in zip(self.brain.target_net.parameters(),
+        #                                        self.brain.policy_net.parameters()):
+        #     target_param.data.copy_(TAU * policy_param.data + (1.0 - TAU) * target_param.data)
         
         self.brain.steps += 1
         
@@ -878,7 +1008,7 @@ class NeuralNavApp(QMainWindow):
                 self.brain.prev_dist = dist
 
         self.update_visuals()
-        self.val_eps.setText(f"{self.brain.epsilon:.3f}")
+        # self.val_eps.setText(f"{self.brain.epsilon:.3f}")
         self.val_rew.setText(f"{self.brain.score:.0f}")
 
     def update_visuals(self):
