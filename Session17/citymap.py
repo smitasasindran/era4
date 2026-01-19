@@ -39,9 +39,11 @@ CAR_WIDTH = 14
 CAR_HEIGHT = 8   
 SENSOR_DIST = 16
 SENSOR_ANGLE = 45
-SPEED = 2       
+# SPEED = 2
+MIN_SPEED = 0.5
+MAX_SPEED = 5.0
 TURN_SPEED = 1
-SHARP_TURN = 30  # Sharp turn angle for tight corners
+MAX_STEER = 30 # Max turn angle
 
 # RL
 BATCH_SIZE = 512
@@ -149,8 +151,12 @@ class CarBrain:
         # self.optimizer = optim.Adam(self.policy_net.parameters(), lr=LR)
 
         # max_action = float(env.action_space.high[0])
-        self.action_dim = 1 # # Turn angle, speed. Starting with just speed
+        self.action_dim = 2 # # Turn angle, speed
         self.max_action = 1.0
+
+        # Interpretation
+        # action[0] → steering   (-1 = hard left, +1 = hard right)
+        # action[1] → throttle   ( 0 = stop,      +1 = max speed)
 
         self.actor = Actor(self.input_dim, self.action_dim, self.max_action)        # model that gets back propagated
         self.actor_target = Actor(self.input_dim, self.action_dim, self.max_action)       # actor target model that will be updated by polyak averaging
@@ -261,24 +267,18 @@ class CarBrain:
         return np.array(state, dtype=np.float32), dist
 
     def step(self, action):
-        # ToDo Smita: Change action 
-        turn = 0
-        if action == 0:   # Left turn
-            turn = -TURN_SPEED
-        elif action == 1: # Straight
-            turn = 0
-        elif action == 2: # Right turn
-            turn = TURN_SPEED
-        elif action == 3: # Sharp left turn
-            turn = -SHARP_TURN
-        elif action == 4: # Sharp right turn
-            turn = SHARP_TURN
-        
-        self.car_angle += turn
+        steer, throttle = action # Continuous inputs
+
+        # --- Continuous steering ---
+        self.car_angle += steer * MAX_STEER
+
         rad = math.radians(self.car_angle)
-        
-        new_x = self.car_pos.x() + math.cos(rad) * SPEED
-        new_y = self.car_pos.y() + math.sin(rad) * SPEED
+
+        # --- Continuous speed ---
+        speed = MIN_SPEED + throttle * (MAX_SPEED - MIN_SPEED)
+
+        new_x = self.car_pos.x() + math.cos(rad) * speed
+        new_y = self.car_pos.y() + math.sin(rad) * speed
         self.car_pos = QPointF(new_x, new_y)
         
         next_state, dist = self.get_state()
@@ -286,7 +286,11 @@ class CarBrain:
         
         reward = -0.1
         done = False
-        
+
+        # Add turn penalty
+        turn_penalty = 0.05 * abs(steer)
+        reward -= turn_penalty
+
         car_center_val = self.check_pixel(self.car_pos.x(), self.car_pos.y())
         
         # CRASH DETECTION: Only check if CAR is off the road (not sensors)
@@ -315,8 +319,16 @@ class CarBrain:
             if self.prev_dist is not None and dist > self.prev_dist:
                 reward -= 10
             self.prev_dist = dist
+
+            # Adding reward for progress
+            progress = self.prev_dist - dist
+            reward += 2.0 * progress
             
         self.score += reward
+
+        # If throttle stays near zero → reward shaping issue. If steer saturates ±1 → steering range too large
+        print(f"steer={steer:.2f}, throttle={throttle:.2f}, reward={reward:.2f}")
+
         return next_state, reward, done
 
     def check_pixel(self, x, y):
@@ -363,7 +375,8 @@ class CarBrain:
         
         s, a, r, ns, d = zip(*batch)
         state = torch.FloatTensor(np.array(s))
-        action = torch.FloatTensor(a).unsqueeze(1)
+        # action = torch.FloatTensor(a).unsqueeze(1) # shape [B, 2, 1]
+        action = torch.FloatTensor(np.array(a))      # shape [B, 2]
         reward = torch.FloatTensor(r).unsqueeze(1)
         next_state = torch.FloatTensor(np.array(ns))
         done = torch.FloatTensor(d).unsqueeze(1)
@@ -384,8 +397,13 @@ class CarBrain:
         # return loss.item()
 
         with torch.no_grad():
-            noise = (torch.randn_like(action) * 0.2).clamp(-0.5, 0.5)
-            next_action = (self.actor_target(next_state) + noise) #.clamp(-1, 1)
+            # noise = (torch.randn_like(action) * 0.2).clamp(-0.5, 0.5)
+            # Dimension aware noise
+            noise = torch.randn_like(action)
+            noise[:, 0] *= 0.1  # steering noise
+            noise[:, 1] *= 0.2  # throttle noise
+            noise = noise.clamp(-0.5, 0.5)
+            next_action = (self.actor_target(next_state) + noise).clamp(-1, 1)
 
             target_Q1, target_Q2 = self.critic_target(next_state, next_action)
             target_Q = torch.min(target_Q1, target_Q2)
@@ -892,18 +910,10 @@ class NeuralNavApp(QMainWindow):
         if event.key() == Qt.Key.Key_Space and self.setup_state == 2:
             self.btn_run.click()
 
-    def continuous_to_discrete(self, a):
-        if a < -0.5: return 3  # sharp left
-        if a < -0.1: return 0  # left
-        if a < 0.1: return 1  # straight
-        if a < 0.5: return 2  # right
-        return 4  # sharp right
-
     def game_loop(self):
         if self.setup_state != 2: return
 
         state, _ = self.brain.get_state()
-        action = 0
         
         # Track current target index before step
         prev_target_idx = self.brain.current_target_idx
@@ -916,19 +926,21 @@ class NeuralNavApp(QMainWindow):
         #         q = self.brain.policy_net(torch.FloatTensor(state).unsqueeze(0))
         #         action = q.argmax().item()
         with torch.no_grad():
-            a = self.brain.actor(torch.FloatTensor(state).unsqueeze(0)).item()
+            # a = self.brain.actor(torch.FloatTensor(state).unsqueeze(0)).item()
+            a = self.brain.actor(torch.FloatTensor(state).unsqueeze(0)).cpu().numpy()[0]
 
         # Exploration noise
-        a += np.random.normal(0, 0.1)
+        a += np.random.normal(0, 0.1, size=2)
         a = np.clip(a, -1.0, 1.0)
 
-        action = self.continuous_to_discrete(a)
+        steer = a[0]                # [-1, 1] Angles are positive or negative
+        throttle = (a[1] + 1) / 2   # map [-1,1] → [0,1]. Negative speed makes no sense for the environment.
+        action = (steer, throttle)
 
-        next_s, rew, done = self.brain.step(action)
+        next_s, rew, done = self.brain.step(action) # Using rescaled action to get next state
         
         # Store experience in current episode buffer. Instead of storing discrete action index, store continuous action:
-        # self.brain.store_experience((state, action, rew, next_s, done))
-        self.brain.store_experience((state, a, rew, next_s, done))
+        self.brain.store_experience((state, a, rew, next_s, done)) # Save original continuous action to buffer
         self.brain.optimize()
         
         # Check if target switched
