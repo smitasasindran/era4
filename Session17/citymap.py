@@ -143,15 +143,7 @@ class CarBrain:
         
         # RL Init
         self.input_dim = 9  # 7 sensors + angle_to_target + distance_to_target
-        # self.n_actions = 5  # 0: left, 1: straight, 2: right, 3: sharp left, 4: sharp right
-        # self.n_actions = 2 # Turn angle, speed
-        # self.policy_net = DrivingDQN(self.input_dim, self.n_actions)
-        # self.target_net = DrivingDQN(self.input_dim, self.n_actions)
-        # # self.target_net.load_state_dict(self.policy_net.state_dict())
-        # self.optimizer = optim.Adam(self.policy_net.parameters(), lr=LR)
-
-        # max_action = float(env.action_space.high[0])
-        self.action_dim = 2 # # Turn angle, speed
+        self.action_dim = 2 # Turn angle, speed
         self.max_action = 1.0
 
         # Interpretation
@@ -380,21 +372,6 @@ class CarBrain:
         reward = torch.FloatTensor(r).unsqueeze(1)
         next_state = torch.FloatTensor(np.array(ns))
         done = torch.FloatTensor(d).unsqueeze(1)
-
-        # # ToDo Smita: Change policy_net and target_net
-        # q = self.policy_net(s).gather(1, a)
-        # next_q = self.target_net(ns).max(1)[0].detach().unsqueeze(1)
-        # target = r + GAMMA * next_q * (1 - d)
-        #
-        # loss = nn.MSELoss()(q, target)
-        # # self.optimizer.zero_grad()
-        # self.actor_optimizer.zero_grad()
-        # loss.backward()
-        # # self.optimizer.step()
-        # self.actor_optimizer.step()
-        #
-        # if self.epsilon > 0.001: self.epsilon *= 0.9995
-        # return loss.item()
 
         with torch.no_grad():
             # noise = (torch.randn_like(action) * 0.2).clamp(-0.5, 0.5)
@@ -918,13 +895,6 @@ class NeuralNavApp(QMainWindow):
         # Track current target index before step
         prev_target_idx = self.brain.current_target_idx
 
-        # if random.random() < self.brain.epsilon:
-        #     action = random.randint(0, 4)  # 5 actions: 0-4
-        # else:
-        #     # ToDo Smita: pick action from actor? Replace policy_net
-        #     with torch.no_grad():
-        #         q = self.brain.policy_net(torch.FloatTensor(state).unsqueeze(0))
-        #         action = q.argmax().item()
         with torch.no_grad():
             # a = self.brain.actor(torch.FloatTensor(state).unsqueeze(0)).item()
             a = self.brain.actor(torch.FloatTensor(state).unsqueeze(0)).cpu().numpy()[0]
@@ -948,13 +918,7 @@ class NeuralNavApp(QMainWindow):
             target_num = self.brain.current_target_idx + 1
             total = len(self.brain.targets)
             self.log(f"<font color='#88C0D0'>🎯 Target {prev_target_idx + 1} reached! Moving to target {target_num}/{total}</font>")
-        
-        # # Soft target update (Polyak averaging) - every step
-        # # ToDo Smita: Add polyak averaging here for actor-critic. target_net and policy_net
-        # for target_param, policy_param in zip(self.brain.target_net.parameters(),
-        #                                        self.brain.policy_net.parameters()):
-        #     target_param.data.copy_(TAU * policy_param.data + (1.0 - TAU) * target_param.data)
-        
+
         self.brain.steps += 1
         
         if done:
