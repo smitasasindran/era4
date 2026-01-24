@@ -1,0 +1,1032 @@
+import sys
+import os
+import math
+import numpy as np
+import random
+from collections import deque
+import logging
+import time
+
+# --- PYTORCH ---
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+
+# --- PYQT ---
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QPushButton, QLabel, QGraphicsScene, 
+                             QGraphicsView, QGraphicsItem, QFrame, QFileDialog,
+                             QTextEdit, QGridLayout)
+from PyQt6.QtGui import (QImage, QPixmap, QColor, QPen, QBrush, QPainter, 
+                         QPolygonF, QFont, QPainterPath)
+from PyQt6.QtCore import Qt, QTimer, QPointF, QRectF
+
+# ==========================================
+# 1. CONFIGURATION & THEME
+# ==========================================
+# Nordic Theme
+C_BG_DARK   = QColor("#2E3440") 
+C_PANEL     = QColor("#3B4252")
+C_INFO_BG   = QColor("#4C566A") 
+C_ACCENT    = QColor("#88C0D0") 
+C_TEXT      = QColor("#ECEFF4") 
+C_SUCCESS   = QColor("#A3BE8C") 
+C_FAILURE   = QColor("#BF616A") 
+C_SENSOR_ON = QColor("#A3BE8C") # Green
+C_SENSOR_OFF= QColor("#BF616A") # Red
+
+# Physics Tweaks
+CAR_WIDTH = 14     
+CAR_HEIGHT = 8   
+SENSOR_DIST = 16
+SENSOR_ANGLE = 45
+# SPEED = 2
+MIN_SPEED = 1
+MAX_SPEED = 4.0
+# TURN_SPEED = 1
+MAX_STEER = 20 # Max turn angle
+
+# RL
+BATCH_SIZE = 512
+GAMMA = 0.98
+LR = 0.001
+TAU = 0.01  # Polyak averaging coefficient for soft target updates
+MAX_CONSECUTIVE_CRASHES = 2  # Stop training after this many consecutive crashes
+
+# Target Colors (for multiple targets)
+TARGET_COLORS = [
+    QColor(0, 255, 255),      # Cyan
+    QColor(255, 100, 255),    # Magenta
+    QColor(0, 255, 100),      # Green
+    QColor(255, 150, 0),      # Orange
+    QColor(100, 150, 255),    # Blue
+    QColor(255, 50, 150),     # Pink
+    QColor(150, 255, 50),     # Lime
+    QColor(255, 255, 0),      # Yellow
+]
+
+# Configure basic logging settings
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger(__name__)
+
+# ==========================================
+# 2. NEURAL NETWORK
+# ==========================================
+
+class Actor(nn.Module):
+
+  def __init__(self, state_dim, action_dim, max_action):
+    super(Actor, self).__init__()
+    self.layer_1 = nn.Linear(state_dim, 400)
+    self.layer_2 = nn.Linear(400, 300)
+    self.layer_3 = nn.Linear(300, action_dim)
+    self.max_action = max_action
+
+  def forward(self, x):
+    x = F.relu(self.layer_1(x))
+    x = F.relu(self.layer_2(x))
+    x = self.max_action * torch.tanh(self.layer_3(x))
+    return x
+
+
+class Critic(nn.Module):
+
+  def __init__(self, state_dim, action_dim):
+    super(Critic, self).__init__()
+    # Defining the first Critic neural network
+    self.layer_1 = nn.Linear(state_dim + action_dim, 400)
+    self.layer_2 = nn.Linear(400, 300)
+    self.layer_3 = nn.Linear(300, 1)
+    # Defining the second Critic neural network
+    self.layer_4 = nn.Linear(state_dim + action_dim, 400)
+    self.layer_5 = nn.Linear(400, 300)
+    self.layer_6 = nn.Linear(300, 1)
+
+  def forward(self, x, u):
+    xu = torch.cat([x, u], 1)
+    # Forward-Propagation on the first Critic Neural Network
+    x1 = F.relu(self.layer_1(xu))
+    x1 = F.relu(self.layer_2(x1))
+    x1 = self.layer_3(x1)
+    # Forward-Propagation on the second Critic Neural Network
+    x2 = F.relu(self.layer_4(xu))
+    x2 = F.relu(self.layer_5(x2))
+    x2 = self.layer_6(x2)
+    return x1, x2
+
+  def Q1(self, x, u):
+    xu = torch.cat([x, u], 1)
+    x1 = F.relu(self.layer_1(xu))
+    x1 = F.relu(self.layer_2(x1))
+    x1 = self.layer_3(x1)
+    return x1
+
+
+class DrivingDQN(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(DrivingDQN, self).__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, output_dim)
+        )
+    def forward(self, x): return self.net(x)
+
+# ==========================================
+# 3. PHYSICS & LOGIC
+# ==========================================
+class CarBrain:
+    def __init__(self, map_image: QImage):
+        self.map = map_image
+        self.w, self.h = map_image.width(), map_image.height()
+        
+        # RL Init
+        self.input_dim = 9  # 7 sensors + angle_to_target + distance_to_target
+        self.action_dim = 2 # Turn angle, speed
+        self.max_action = 1.0
+
+        # Interpretation
+        # action[0] → steering   (-1 = hard left, +1 = hard right)
+        # action[1] → throttle   ( 0 = stop,      +1 = max speed)
+
+        self.actor = Actor(self.input_dim, self.action_dim, self.max_action)        # model that gets back propagated
+        self.actor_target = Actor(self.input_dim, self.action_dim, self.max_action)       # actor target model that will be updated by polyak averaging
+        self.actor_target.load_state_dict(self.actor.state_dict())
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=LR)
+
+        # Critics - both critics are inside one network and will be trained together
+        self.critic = Critic(self.input_dim, self.action_dim)
+        self.critic_target = Critic(self.input_dim, self.action_dim)    # critic targets that gets updated ny polyak averaging
+        self.critic_target.load_state_dict(self.critic.state_dict())
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=LR)
+
+        self.memory = deque(maxlen=10000)
+        
+        # Prioritized Replay: separate buffer for high-reward episodes
+        self.priority_memory = deque(maxlen=3000)  # Store successful episodes
+        self.current_episode_buffer = []  # Temporary buffer for current episode
+        self.episode_scores = deque(maxlen=100)  # Track recent episode scores
+        
+        self.steps = 0
+        # self.epsilon = 0.5
+        self.consecutive_crashes = 0  # Track consecutive crashes for early stopping
+        
+        # Locations
+        self.start_pos = QPointF(100, 100) 
+        self.car_pos = QPointF(100, 100)   
+        self.car_angle = 0
+        self.target_pos = QPointF(200, 200)  # Current active target
+        
+        # Multiple Targets Support
+        self.targets = []  # List of target positions
+        self.current_target_idx = 0  # Index of current active target
+        self.targets_reached = 0  # Counter for completed targets
+        
+        self.alive = True
+        self.score = 0
+        self.sensor_coords = [] 
+        self.prev_dist = None
+
+    def set_start_pos(self, point):
+        self.start_pos = point
+        self.car_pos = point
+
+    def reset(self):
+        self.alive = True
+        self.score = 0
+        self.car_pos = QPointF(self.start_pos.x(), self.start_pos.y())
+        self.car_angle = random.randint(0, 360)
+        # Reset to first target
+        self.current_target_idx = 0
+        self.targets_reached = 0
+        if len(self.targets) > 0:
+            self.target_pos = self.targets[0]
+        state, dist = self.get_state()
+        # logger.info(f"\n\nIn reset: sensor_vals={state[:7]}, norm_angle={state[7]}, norm_dist={state[8]}")
+        # logger.info(f"In reset: dist={dist}, car_angle={self.car_angle}, car_pos={self.car_pos}\n")
+        self.prev_dist = dist
+        return state
+    
+    def add_target(self, point):
+        """Add a new target to the sequence"""
+        self.targets.append(QPointF(point.x(), point.y()))
+        if len(self.targets) == 1:
+            # First target, set it as active
+            self.target_pos = self.targets[0]
+            self.current_target_idx = 0
+    
+    def switch_to_next_target(self):
+        """Switch to the next target in sequence"""
+        if self.current_target_idx < len(self.targets) - 1:
+            self.current_target_idx += 1
+            self.target_pos = self.targets[self.current_target_idx]
+            self.targets_reached += 1
+            return True  # More targets available
+        return False  # All targets completed
+
+    def get_state(self):
+        sensor_vals = []
+        self.sensor_coords = []
+        # 7 sensors: -45°, -30°, -15°, 0°, 15°, 30°, 45°
+        angles = [-45, -30, -15, 0, 15, 30, 45]
+        
+        for a in angles:
+            rad = math.radians(self.car_angle + a)
+            sx = self.car_pos.x() + math.cos(rad) * SENSOR_DIST
+            sy = self.car_pos.y() + math.sin(rad) * SENSOR_DIST
+            self.sensor_coords.append(QPointF(sx, sy))
+            
+            val = 0.0
+            if 0 <= sx < self.w and 0 <= sy < self.h:
+                c = QColor(self.map.pixel(int(sx), int(sy)))
+                brightness = (c.red() + c.green() + c.blue()) / 3.0
+                val = brightness / 255.0
+            sensor_vals.append(val)
+            
+        dx = self.target_pos.x() - self.car_pos.x()
+        dy = self.target_pos.y() - self.car_pos.y()
+        dist = math.sqrt(dx*dx + dy*dy)
+        
+        rad_to_target = math.atan2(dy, dx)
+        angle_to_target = math.degrees(rad_to_target)
+        
+        angle_diff = (angle_to_target - self.car_angle) % 360
+        if angle_diff > 180: angle_diff -= 360
+        
+        norm_dist = min(dist / 800.0, 1.0)
+        norm_angle = angle_diff / 180.0
+        
+        state = sensor_vals + [norm_angle, norm_dist]
+        return np.array(state, dtype=np.float32), dist
+
+    def step(self, action):
+        steer, throttle = action # Continuous inputs
+
+        # --- Continuous steering ---
+        self.car_angle += steer * MAX_STEER
+
+        rad = math.radians(self.car_angle)
+
+        # --- Continuous speed ---
+        speed = MIN_SPEED + throttle * (MAX_SPEED - MIN_SPEED)
+
+        new_x = self.car_pos.x() + math.cos(rad) * speed
+        new_y = self.car_pos.y() + math.sin(rad) * speed
+        self.car_pos = QPointF(new_x, new_y)
+        
+        next_state, dist = self.get_state()
+        sensors = next_state[:7]  # 7 sensor readings
+        
+        reward = -0.1
+        done = False
+
+        # Add turn penalty
+        turn_penalty = 0.05 * abs(steer)
+        reward -= turn_penalty
+
+        car_center_val = self.check_pixel(self.car_pos.x(), self.car_pos.y())
+        
+        # CRASH DETECTION: Only check if CAR is off the road (not sensors)
+        # Sensors provide information for learning, but don't trigger crashes
+        if car_center_val < 0.4:
+            reward = -100
+            done = True
+            self.alive = False
+        elif dist < 20: 
+            # Target reached!
+            reward = 100
+            # Check if there are more targets
+            has_next = self.switch_to_next_target()
+            if has_next:
+                # Continue to next target
+                done = False
+                # Reset distance tracking for new target
+                _, new_dist = self.get_state()
+                self.prev_dist = new_dist
+            else:
+                # All targets completed
+                done = True
+        else:
+            # 1. Progress toward target (MAIN REWARD)
+            # Penalize if car moves away from goal, and reward if moving closer to goal
+            if self.prev_dist is not None:
+                delta = self.prev_dist - dist
+                reward += delta * 1.5 # positive if moving closer
+                # logger.info(f"In step: delta_dist={delta:.3f}, reward={reward:.3f}")
+
+            # 2. Obstacle avoidance (SOFT penalty)
+            # Sensor values are brightness levels of that sensor. 0=black, 1=white. The roads on the map are white,
+            # therefore low brightness means obstacle, and high brghtness means road. Either reward high brigntness,
+            # or penalise closeness to obstacle
+            min_sensor = min(sensors)
+            # min_sensor = min(sensors[2:5])
+            reward -= (1.0 - min_sensor) * 0.8 # penalizing obstacle close to any sensor
+            # reward -= max(0.0, 0.6 - min_sensor) * 0.8 # map isn't black&white
+
+            self.prev_dist = dist
+            
+        self.score += reward
+
+        # If throttle stays near zero → reward shaping issue. If steer saturates ±1 → steering range too large
+        logger.info(f"steer={steer:.2f}, throttle={throttle:.2f}, final_turn={(steer * MAX_STEER):.2f}, final speed={speed:.2f}")
+        logger.info(f"In step: Reward={reward:.2f}, total score={self.score:.2f}")
+
+        return next_state, reward, done
+
+    def check_pixel(self, x, y):
+        if 0 <= x < self.w and 0 <= y < self.h:
+            c = QColor(self.map.pixel(int(x), int(y)))
+            return ((c.red() + c.green() + c.blue()) / 3.0) / 255.0
+        return 0.0
+
+    def optimize(self):
+        total_memory_size = len(self.memory) + len(self.priority_memory)
+        if total_memory_size < BATCH_SIZE: return 0
+        
+        # ADAPTIVE PRIORITIZED SAMPLING
+        # Calculate success rate: what % of experiences are from successful episodes
+        success_rate = len(self.priority_memory) / max(total_memory_size, 1)
+        
+        # Adaptive ratio: 30% to 70% based on success rate
+        # Early training (few successes): ~30-40% priority sampling
+        # Later training (many successes): ~60-70% priority sampling
+        priority_ratio = 0.3 + (success_rate * 0.4)  # Maps [0,1] → [0.3, 0.7]
+        
+        priority_samples = int(BATCH_SIZE * priority_ratio)
+        regular_samples = BATCH_SIZE - priority_samples
+        
+        batch = []
+        
+        # Sample from priority memory (high-reward episodes)
+        if len(self.priority_memory) >= priority_samples:
+            batch.extend(random.sample(self.priority_memory, priority_samples))
+        else:
+            # If not enough priority samples, take all and fill from regular memory
+            batch.extend(list(self.priority_memory))
+            regular_samples += priority_samples - len(self.priority_memory)
+        
+        # Sample from regular memory
+        if len(self.memory) >= regular_samples:
+            batch.extend(random.sample(self.memory, regular_samples))
+        else:
+            batch.extend(list(self.memory))
+        
+        # If still not enough, return
+        if len(batch) < BATCH_SIZE // 2:
+            return 0
+        
+        s, a, r, ns, d = zip(*batch)
+        state = torch.FloatTensor(np.array(s))
+        # action = torch.FloatTensor(a).unsqueeze(1) # shape [B, 2, 1]
+        action = torch.FloatTensor(np.array(a))      # shape [B, 2]
+        reward = torch.FloatTensor(r).unsqueeze(1)
+        next_state = torch.FloatTensor(np.array(ns))
+        done = torch.FloatTensor(d).unsqueeze(1)
+
+        with torch.no_grad():
+            # noise = (torch.randn_like(action) * 0.2).clamp(-0.5, 0.5)
+            # Dimension aware noise
+            noise = torch.randn_like(action)
+            noise[:, 0] *= 0.1  # steering noise
+            noise[:, 1] *= 0.2  # throttle noise
+            noise = noise.clamp(-0.5, 0.5)
+            next_action = (self.actor_target(next_state) + noise).clamp(-1, 1)
+
+            target_Q1, target_Q2 = self.critic_target(next_state, next_action)
+            target_Q = torch.min(target_Q1, target_Q2)
+            target_Q = reward + (1 - done) * GAMMA * target_Q
+
+        # Critic loss - both critics learn independently
+        current_Q1, current_Q2 = self.critic(state, action)
+        critic_loss = nn.MSELoss()(current_Q1, target_Q) + nn.MSELoss()(current_Q2, target_Q)
+
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
+
+        # Delayed actor update
+        if self.steps % 2 == 0:
+            actor_loss = -self.critic.Q1(state, self.actor(state)).mean()
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            self.actor_optimizer.step()
+
+            # Soft updates
+            for p, tp in zip(self.actor.parameters(), self.actor_target.parameters()):
+                tp.data.copy_(TAU * p.data + (1 - TAU) * tp.data)
+
+            for p, tp in zip(self.critic.parameters(), self.critic_target.parameters()):
+                tp.data.copy_(TAU * p.data + (1 - TAU) * tp.data)
+
+        return critic_loss.item()
+
+
+    def store_experience(self, experience):
+        """Store experience in current episode buffer"""
+        self.current_episode_buffer.append(experience)
+    
+    def finalize_episode(self, episode_reward):
+        """Move episode experiences to appropriate memory based on reward"""
+        if len(self.current_episode_buffer) == 0:
+            return
+        
+        # Track episode score
+        self.episode_scores.append(episode_reward)
+        
+        # Track consecutive crashes for early stopping
+        if not self.alive:  # Episode ended in crash
+            self.consecutive_crashes += 1
+        else:  # Episode ended successfully
+            self.consecutive_crashes = 0  # Reset counter on success
+        
+        # Determine if this is a high-reward episode
+        # High reward = positive score (successful navigation)
+        if episode_reward > 0:
+            # Add to priority memory (high-reward episodes)
+            for exp in self.current_episode_buffer:
+                self.priority_memory.append(exp)
+        else:
+            # Add to regular memory
+            for exp in self.current_episode_buffer:
+                self.memory.append(exp)
+        
+        # Clear episode buffer for next episode
+        self.current_episode_buffer = []
+
+    def load_model(self):
+        # Load saved model
+        pass
+
+    def save_model(self):
+        pass
+
+# ==========================================
+# 4. CUSTOM WIDGETS (VISUALS)
+# ==========================================
+class RewardChart(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setMinimumHeight(150)
+        self.setStyleSheet(f"background-color: {C_PANEL.name()}; border-radius: 5px;")
+        self.scores = []
+        self.max_points = 50 # How many episodes to show
+
+    def update_chart(self, new_score):
+        self.scores.append(new_score)
+        if len(self.scores) > self.max_points:
+            self.scores.pop(0)
+        self.update() # Trigger repaint
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        w = self.width()
+        h = self.height()
+        
+        # Background
+        painter.fillRect(0, 0, w, h, C_PANEL)
+        
+        if len(self.scores) < 2:
+            return
+
+        # Normalize data
+        min_val = min(self.scores)
+        max_val = max(self.scores)
+        if max_val == min_val: max_val += 1
+        
+        # Calculate points
+        points = []
+        step_x = w / (self.max_points - 1)
+        
+        for i, score in enumerate(self.scores):
+            x = i * step_x
+            # Normalize y to 10% padding top/bottom
+            ratio = (score - min_val) / (max_val - min_val)
+            y = h - (ratio * (h * 0.8) + (h * 0.1))
+            points.append(QPointF(x, y))
+
+        # Draw Path (Raw scores)
+        path = QPainterPath()
+        path.moveTo(points[0])
+        for p in points[1:]:
+            path.lineTo(p)
+            
+        # Draw Raw Score Line
+        pen = QPen(C_ACCENT, 2)
+        painter.setPen(pen)
+        painter.drawPath(path)
+        
+        # Calculate and draw moving average (last 10)
+        if len(self.scores) >= 2:
+            avg_points = []
+            window_size = 10
+            
+            for i in range(len(self.scores)):
+                # Calculate average of last 'window_size' scores up to current index
+                start_idx = max(0, i - window_size + 1)
+                avg_score = sum(self.scores[start_idx:i+1]) / (i - start_idx + 1)
+                
+                x = i * step_x
+                ratio = (avg_score - min_val) / (max_val - min_val)
+                y = h - (ratio * (h * 0.8) + (h * 0.1))
+                avg_points.append(QPointF(x, y))
+            
+            # Draw moving average line
+            if len(avg_points) > 1:
+                avg_path = QPainterPath()
+                avg_path.moveTo(avg_points[0])
+                for p in avg_points[1:]:
+                    avg_path.lineTo(p)
+                
+                # Draw with yellow/gold color and thicker line
+                avg_pen = QPen(QColor(255, 215, 0), 3)  # Gold color
+                painter.setPen(avg_pen)
+                painter.drawPath(avg_path)
+        
+        # Draw Zero Line if visible
+        if min_val < 0 and max_val > 0:
+            zero_ratio = (0 - min_val) / (max_val - min_val)
+            y_zero = h - (zero_ratio * (h * 0.8) + (h * 0.1))
+            painter.setPen(QPen(QColor(255, 255, 255, 50), 1, Qt.PenStyle.DashLine))
+            painter.drawLine(0, int(y_zero), w, int(y_zero))
+        
+        # Draw Legend
+        legend_x = 10
+        legend_y = 15
+        
+        # Raw score legend
+        painter.setPen(QPen(C_ACCENT, 2))
+        painter.drawLine(legend_x, legend_y, legend_x + 20, legend_y)
+        painter.setPen(QPen(QColor(200, 200, 200)))
+        painter.setFont(QFont("Segoe UI", 9))
+        painter.drawText(legend_x + 25, legend_y + 4, "Raw")
+        
+        # Moving average legend
+        painter.setPen(QPen(QColor(255, 215, 0), 3))
+        painter.drawLine(legend_x + 60, legend_y, legend_x + 80, legend_y)
+        painter.setPen(QPen(QColor(200, 200, 200)))
+        painter.drawText(legend_x + 85, legend_y + 4, "Avg (10)")
+
+class SensorItem(QGraphicsItem):
+    """Animated sensor dot with pulsing effect"""
+    def __init__(self):
+        super().__init__()
+        self.setZValue(90)
+        self.pulse = 0
+        self.pulse_speed = 0.3
+        self.is_detecting = True  # Whether sensor sees road
+        
+    def set_detecting(self, detecting):
+        """Update sensor state (road/obstacle)"""
+        self.is_detecting = detecting
+        self.update()
+    
+    def boundingRect(self):
+        return QRectF(-4, -4, 8, 8)
+    
+    def paint(self, painter, option, widget):
+        # Pulsing animation
+        self.pulse += self.pulse_speed
+        if self.pulse > 1.0:
+            self.pulse = 0
+        
+        # Color based on detection
+        if self.is_detecting:
+            color = C_SENSOR_ON  # Green - sees road
+            outer_alpha = int(150 * (1 - self.pulse))
+        else:
+            color = C_SENSOR_OFF  # Red - sees obstacle
+            outer_alpha = int(200 * (1 - self.pulse))
+        
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Outer glow (pulsing)
+        outer_size = 3 + (2 * self.pulse)
+        outer_color = QColor(color)
+        outer_color.setAlpha(outer_alpha)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(outer_color))
+        painter.drawEllipse(QPointF(0, 0), outer_size, outer_size)
+        
+        # Inner core (solid)
+        painter.setBrush(QBrush(color))
+        painter.drawEllipse(QPointF(0, 0), 2, 2)
+
+class CarItem(QGraphicsItem):
+    def __init__(self):
+        super().__init__()
+        self.setZValue(100)
+        self.brush = QBrush(C_ACCENT)
+        self.pen = QPen(Qt.GlobalColor.white, 1)
+
+    def boundingRect(self):
+        return QRectF(-CAR_WIDTH/2, -CAR_HEIGHT/2, CAR_WIDTH, CAR_HEIGHT)
+
+    def paint(self, painter, option, widget):
+        painter.setBrush(self.brush)
+        painter.setPen(self.pen)
+        painter.drawRoundedRect(self.boundingRect(), 2, 2)
+        painter.setBrush(Qt.GlobalColor.white)
+        painter.drawRect(int(CAR_WIDTH/2)-2, -3, 2, 6)
+
+class TargetItem(QGraphicsItem):
+    def __init__(self, color=None, is_active=True, number=1):
+        super().__init__()
+        self.setZValue(50)
+        self.pulse = 0
+        self.growing = True
+        self.color = color if color else QColor(0, 255, 255)
+        self.is_active = is_active  # Active target pulses, inactive is dimmed
+        self.number = number  # Sequence number (1, 2, 3, ...)
+
+    def set_active(self, active):
+        """Set whether this target is currently active"""
+        self.is_active = active
+        self.update()
+    
+    def set_color(self, color):
+        """Update the color of this target"""
+        self.color = color
+        self.update()
+
+    def boundingRect(self):
+        return QRectF(-20, -20, 40, 40)
+
+    def paint(self, painter, option, widget):
+        if self.is_active:
+            # Active target pulses
+            if self.growing:
+                self.pulse += 0.5
+                if self.pulse > 10: self.growing = False
+            else:
+                self.pulse -= 0.5
+                if self.pulse < 0: self.growing = True
+            
+            r = 10 + self.pulse
+            painter.setPen(Qt.PenStyle.NoPen)
+            outer_color = QColor(self.color)
+            outer_color.setAlpha(100)
+            painter.setBrush(QBrush(outer_color)) 
+            painter.drawEllipse(QPointF(0,0), r, r)
+            painter.setBrush(QBrush(self.color)) 
+            painter.setPen(QPen(Qt.GlobalColor.white, 2))
+            painter.drawEllipse(QPointF(0,0), 8, 8)
+        else:
+            # Inactive target is smaller and dimmed
+            dimmed_color = QColor(self.color)
+            dimmed_color.setAlpha(120)
+            painter.setPen(QPen(Qt.GlobalColor.white, 1))
+            painter.setBrush(QBrush(dimmed_color))
+            painter.drawEllipse(QPointF(0,0), 6, 6)
+        
+        # Draw sequence number
+        painter.setPen(QPen(Qt.GlobalColor.white))
+        painter.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        painter.drawText(QRectF(-10, -10, 20, 20), Qt.AlignmentFlag.AlignCenter, str(self.number))
+
+# ==========================================
+# 5. APP
+# ==========================================
+class NeuralNavApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("NeuralNav: Precise Control")
+        self.resize(1300, 850)
+        self.setStyleSheet(f"""
+            QMainWindow {{ background-color: {C_BG_DARK.name()}; }}
+            QLabel {{ color: {C_TEXT.name()}; font-family: Segoe UI; font-size: 13px; }}
+            QPushButton {{ background-color: {C_PANEL.name()}; color: white; border: 1px solid {C_INFO_BG.name()}; padding: 8px; border-radius: 4px; }}
+            QPushButton:hover {{ background-color: {C_INFO_BG.name()}; }}
+            QPushButton:checked {{ background-color: {C_ACCENT.name()}; color: black; }}
+            QTextEdit {{ background-color: {C_PANEL.name()}; color: #D8DEE9; border: none; font-family: Consolas; font-size: 11px; }}
+            QFrame {{ border: none; }}
+        """)
+
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QHBoxLayout(central)
+
+        # LEFT PANEL
+        panel = QFrame()
+        panel.setFixedWidth(280)
+        panel.setStyleSheet(f"background-color: {C_BG_DARK.name()};")
+        vbox = QVBoxLayout(panel)
+        vbox.setSpacing(10)
+        
+        # Header
+        lbl_title = QLabel("CONTROLS")
+        lbl_title.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 5px;")
+        vbox.addWidget(lbl_title)
+        
+        # Status Box
+        self.lbl_status = QLabel("1. Click Map -> CAR\n2. Click Map -> TARGET(S)\n   (Multiple clicks for sequence)")
+        self.lbl_status.setStyleSheet(f"background-color: {C_INFO_BG.name()}; padding: 10px; border-radius: 5px; color: #E5E9F0;")
+        vbox.addWidget(self.lbl_status)
+
+        # Buttons
+        self.btn_run = QPushButton("▶ START (Space)")
+        self.btn_run.setCheckable(True)
+        self.btn_run.setEnabled(False) 
+        self.btn_run.clicked.connect(self.toggle_training)
+        vbox.addWidget(self.btn_run)
+        
+        self.btn_reset = QPushButton("↺ RESET ALL")
+        self.btn_reset.clicked.connect(self.full_reset)
+        vbox.addWidget(self.btn_reset)
+        
+        self.btn_load = QPushButton("📂 LOAD MAP")
+        self.btn_load.clicked.connect(self.load_map_dialog)
+        vbox.addWidget(self.btn_load)
+
+        # Chart Section
+        vbox.addSpacing(15)
+        vbox.addWidget(QLabel("REWARD HISTORY"))
+        self.chart = RewardChart()
+        vbox.addWidget(self.chart)
+
+        # Stats Grid (Replaced QGroupBox with QFrame to fix overlap)
+        stats_frame = QFrame()
+        stats_frame.setStyleSheet(f"background-color: {C_PANEL.name()}; border-radius: 5px;")
+        sf_layout = QGridLayout(stats_frame)
+        sf_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # self.val_eps = QLabel("1.00")
+        # self.val_eps.setStyleSheet(f"color: {C_ACCENT.name()}; font-weight: bold;")
+        # sf_layout.addWidget(QLabel("Epsilon:"), 0,0)
+        # sf_layout.addWidget(self.val_eps, 0,1)
+        
+        self.val_rew = QLabel("0")
+        self.val_rew.setStyleSheet(f"color: {C_ACCENT.name()}; font-weight: bold;")
+        sf_layout.addWidget(QLabel("Last Reward:"), 1,0)
+        sf_layout.addWidget(self.val_rew, 1,1)
+        
+        vbox.addWidget(stats_frame)
+
+        # Logs
+        vbox.addWidget(QLabel("LOGS"))
+        self.log_console = QTextEdit()
+        self.log_console.setReadOnly(True)
+        vbox.addWidget(self.log_console)
+
+        main_layout.addWidget(panel)
+
+        # RIGHT PANEL
+        self.scene = QGraphicsScene()
+        self.view = QGraphicsView(self.scene)
+        self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.view.setStyleSheet(f"border: 2px solid {C_PANEL.name()}; background-color: {C_BG_DARK.name()}")
+        self.view.mousePressEvent = self.on_scene_click
+        main_layout.addWidget(self.view)
+
+        # Logic
+        self.setup_map("city_map.png") 
+        self.setup_state = 0 
+        self.sim_timer = QTimer()
+        self.sim_timer.timeout.connect(self.game_loop)
+        
+        self.car_item = CarItem()
+        self.target_items = []  # List of target items
+        self.sensor_items = []
+        # Create 7 animated sensors
+        for _ in range(7):
+            si = SensorItem()
+            self.scene.addItem(si)
+            self.sensor_items.append(si)
+
+    def log(self, msg):
+        self.log_console.append(msg)
+        sb = self.log_console.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def setup_map(self, path):
+        if not os.path.exists(path):
+            self.create_dummy_map(path)
+        self.map_img = QImage(path).convertToFormat(QImage.Format.Format_RGB32)
+        self.scene.clear()
+        self.scene.addPixmap(QPixmap.fromImage(self.map_img))
+        self.brain = CarBrain(self.map_img)
+        self.log(f"Map Loaded.")
+
+    def create_dummy_map(self, path):
+        img = QImage(1000, 800, QImage.Format.Format_RGB32)
+        img.fill(C_BG_DARK)
+        p = QPainter(img)
+        p.setBrush(Qt.GlobalColor.white)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(100, 100, 800, 600)
+        p.setBrush(C_BG_DARK)
+        p.drawEllipse(250, 250, 500, 300)
+        p.end()
+        img.save(path)
+
+    def load_map_dialog(self):
+        f, _ = QFileDialog.getOpenFileName(self, "Load Map", "", "Images (*.png *.jpg)")
+        if f: 
+            self.full_reset()
+            self.setup_map(f)
+
+    def on_scene_click(self, event):
+        pt = self.view.mapToScene(event.pos())
+        if self.setup_state == 0:
+            # Set car position
+            self.brain.set_start_pos(pt) 
+            self.scene.addItem(self.car_item)
+            self.car_item.setPos(pt)
+            self.setup_state = 1
+            self.lbl_status.setText("Click Map -> TARGET(S)\nRight-click when done")
+        elif self.setup_state == 1:
+            # Add target
+            if event.button() == Qt.MouseButton.LeftButton:
+                # Add a new target
+                self.brain.add_target(pt)
+                target_idx = len(self.brain.targets) - 1
+                color = TARGET_COLORS[target_idx % len(TARGET_COLORS)]
+                is_active = (target_idx == 0)  # First target is active
+                num_targets = len(self.brain.targets)
+                
+                target_item = TargetItem(color, is_active, num_targets)
+                target_item.setPos(pt)
+                self.scene.addItem(target_item)
+                self.target_items.append(target_item)
+                
+                self.lbl_status.setText(f"Targets: {num_targets}\nRight-click to finish setup")
+                self.log(f"Target #{num_targets} added at ({pt.x():.0f}, {pt.y():.0f})")
+            
+            elif event.button() == Qt.MouseButton.RightButton:
+                # Finish setup if at least one target exists
+                if len(self.brain.targets) > 0:
+                    self.setup_state = 2
+                    self.lbl_status.setText(f"READY. {len(self.brain.targets)} target(s). Press SPACE.")
+                    self.lbl_status.setStyleSheet(f"background-color: {C_SUCCESS.name()}; color: #2E3440; font-weight: bold; padding: 10px; border-radius: 5px;")
+                    self.btn_run.setEnabled(True)
+                    self.update_visuals()
+
+    def full_reset(self):
+        self.sim_timer.stop()
+        self.btn_run.setChecked(False)
+        self.btn_run.setEnabled(False)
+        self.setup_state = 0
+        self.scene.removeItem(self.car_item)
+        # Remove all target items
+        for target_item in self.target_items:
+            self.scene.removeItem(target_item)
+        self.target_items = []
+        # Clear brain targets
+        self.brain.targets = []
+        self.brain.current_target_idx = 0
+        self.brain.targets_reached = 0
+        
+        for s in self.sensor_items: 
+            if s.scene() == self.scene: self.scene.removeItem(s)
+        self.lbl_status.setText("1. Click Map -> CAR\n2. Click Map -> TARGET(S)")
+        self.lbl_status.setStyleSheet(f"background-color: {C_INFO_BG.name()}; color: white; padding: 10px; border-radius: 5px;")
+        self.log("--- RESET ---")
+        self.chart.scores = []
+        self.chart.update()
+
+    def toggle_training(self):
+        if self.btn_run.isChecked():
+            self.sim_timer.start(16)
+            self.btn_run.setText("⏸ PAUSE")
+        else:
+            self.sim_timer.stop()
+            self.btn_run.setText("▶ RESUME")
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Space and self.setup_state == 2:
+            self.btn_run.click()
+
+    def game_loop(self):
+        if self.setup_state != 2: return
+
+        state, _ = self.brain.get_state()
+        
+        # Track current target index before step
+        prev_target_idx = self.brain.current_target_idx
+
+        with torch.no_grad():
+            # a = self.brain.actor(torch.FloatTensor(state).unsqueeze(0)).item()
+            a = self.brain.actor(torch.FloatTensor(state).unsqueeze(0)).cpu().numpy()[0]
+
+        # Exploration noise
+        a += np.random.normal(0, 0.1, size=2)
+        a = np.clip(a, -1.0, 1.0)
+
+        steer = a[0]                # [-1, 1] Angles are positive or negative
+        throttle = (a[1] + 1) / 2   # map [-1,1] → [0,1]. Negative speed makes no sense for the environment.
+        action = (steer, throttle)
+
+        next_s, rew, done = self.brain.step(action) # Using rescaled action to get next state
+        
+        # Store experience in current episode buffer. Instead of storing discrete action index, store continuous action:
+        self.brain.store_experience((state, a, rew, next_s, done)) # Save original continuous action to buffer
+        self.brain.optimize()
+        
+        # Check if target switched
+        if self.brain.current_target_idx != prev_target_idx:
+            target_num = self.brain.current_target_idx + 1
+            total = len(self.brain.targets)
+            self.log(f"<font color='#88C0D0'>🎯 Target {prev_target_idx + 1} reached! Moving to target {target_num}/{total}</font>")
+
+        self.brain.steps += 1
+        
+        if done:
+            # Finalize episode and move experiences to appropriate memory
+            self.brain.finalize_episode(self.brain.score)
+            
+            # Determine reset behavior based on crash counter
+            should_reset_position = False
+            
+            # Check for max consecutive crashes (reset to origin)
+            if self.brain.consecutive_crashes >= MAX_CONSECUTIVE_CRASHES:
+                self.log(f"<font color='#BF616A'><b>⚠️ {MAX_CONSECUTIVE_CRASHES} consecutive crashes! Resetting to origin...</b></font>")
+                self.log(f"<font color='#88C0D0'>💡 Tip: Adjust hyperparameters, simplify map, or increase exploration (epsilon)</font>")
+                # Reset crash counter and position
+                self.brain.consecutive_crashes = 0
+                should_reset_position = True
+            
+            if not self.brain.alive:
+                txt = f"CRASH ({self.brain.consecutive_crashes}/{MAX_CONSECUTIVE_CRASHES})"
+                col = "#BF616A"
+            else:
+                # Check if all targets completed
+                if self.brain.targets_reached == len(self.brain.targets) - 1:
+                    txt = f"ALL {len(self.brain.targets)} TARGETS COMPLETED!"
+                    col = "#A3BE8C"
+                else:
+                    txt = "GOAL"
+                    col = "#A3BE8C"
+                # Always reset position on success
+                should_reset_position = True
+            
+            # Log memory statistics with adaptive sampling ratio
+            priority_size = len(self.brain.priority_memory)
+            regular_size = len(self.brain.memory)
+            total_mem = priority_size + regular_size
+            priority_pct = (priority_size / total_mem * 100) if total_mem > 0 else 0
+            
+            # Calculate current adaptive sampling ratio
+            success_rate = priority_size / max(total_mem, 1)
+            sampling_ratio = 0.3 + (success_rate * 0.4)
+            
+            self.log(f"<font color='{col}'>{txt} (Scr: {self.brain.score:.0f}) | "
+                    f"Mem: {priority_size}P/{regular_size}R ({priority_pct:.1f}%) | "
+                    f"Sample: {sampling_ratio*100:.0f}%P</font>")
+            
+            # Update Chart
+            self.chart.update_chart(self.brain.score)
+            
+            # Reset based on condition
+            if should_reset_position:
+                self.brain.reset()  # Full reset (position + score + targets)
+            else:
+                # Partial reset: keep position, reset score and targets
+                # Car stays where it crashed but gets fresh attempt
+                self.brain.score = 0
+                self.brain.alive = True
+                self.brain.current_target_idx = 0
+                self.brain.targets_reached = 0
+                if len(self.brain.targets) > 0:
+                    self.brain.target_pos = self.brain.targets[0]
+                # Reset distance tracking
+                _, dist = self.brain.get_state()
+                self.brain.prev_dist = dist
+
+        self.update_visuals()
+        # self.val_eps.setText(f"{self.brain.epsilon:.3f}")
+        self.val_rew.setText(f"{self.brain.score:.0f}")
+
+    def update_visuals(self):
+        self.car_item.setPos(self.brain.car_pos)
+        self.car_item.setRotation(self.brain.car_angle)
+        
+        # Update target visuals based on current active target
+        for i, target_item in enumerate(self.target_items):
+            is_active = (i == self.brain.current_target_idx)
+            target_item.set_active(is_active)
+        
+        self.scene.update() 
+        
+        # Update all 7 sensors
+        for i, coord in enumerate(self.brain.sensor_coords):
+            self.sensor_items[i].setPos(coord)
+            s_val = self.brain.get_state()[0][i]
+            self.sensor_items[i].set_detecting(s_val > 0.5)  # True if sees road
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    win = NeuralNavApp()
+    win.show()
+    sys.exit(app.exec())
