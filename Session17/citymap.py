@@ -4,6 +4,8 @@ import math
 import numpy as np
 import random
 from collections import deque
+import logging
+import time
 
 # --- PYTORCH ---
 import torch
@@ -40,10 +42,10 @@ CAR_HEIGHT = 8
 SENSOR_DIST = 16
 SENSOR_ANGLE = 45
 # SPEED = 2
-MIN_SPEED = 0.5
-MAX_SPEED = 5.0
-TURN_SPEED = 1
-MAX_STEER = 30 # Max turn angle
+MIN_SPEED = 1
+MAX_SPEED = 4.0
+# TURN_SPEED = 1
+MAX_STEER = 20 # Max turn angle
 
 # RL
 BATCH_SIZE = 512
@@ -63,6 +65,14 @@ TARGET_COLORS = [
     QColor(150, 255, 50),     # Lime
     QColor(255, 255, 0),      # Yellow
 ]
+
+# Configure basic logging settings
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger(__name__)
 
 # ==========================================
 # 2. NEURAL NETWORK
@@ -203,6 +213,8 @@ class CarBrain:
         if len(self.targets) > 0:
             self.target_pos = self.targets[0]
         state, dist = self.get_state()
+        # logger.info(f"\n\nIn reset: sensor_vals={state[:7]}, norm_angle={state[7]}, norm_dist={state[8]}")
+        # logger.info(f"In reset: dist={dist}, car_angle={self.car_angle}, car_pos={self.car_pos}\n")
         self.prev_dist = dist
         return state
     
@@ -306,20 +318,29 @@ class CarBrain:
                 # All targets completed
                 done = True
         else:
-            reward += (1.0 - next_state[4]) * 20
-            # Penalize increasing distance
-            if self.prev_dist is not None and dist > self.prev_dist:
-                reward -= 10
-            self.prev_dist = dist
+            # 1. Progress toward target (MAIN REWARD)
+            # Penalize if car moves away from goal, and reward if moving closer to goal
+            if self.prev_dist is not None:
+                delta = self.prev_dist - dist
+                reward += delta * 1.5 # positive if moving closer
+                # logger.info(f"In step: delta_dist={delta:.3f}, reward={reward:.3f}")
 
-            # Adding reward for progress
-            progress = self.prev_dist - dist
-            reward += 2.0 * progress
+            # 2. Obstacle avoidance (SOFT penalty)
+            # Sensor values are brightness levels of that sensor. 0=black, 1=white. The roads on the map are white,
+            # therefore low brightness means obstacle, and high brghtness means road. Either reward high brigntness,
+            # or penalise closeness to obstacle
+            min_sensor = min(sensors)
+            # min_sensor = min(sensors[2:5])
+            reward -= (1.0 - min_sensor) * 0.8 # penalizing obstacle close to any sensor
+            # reward -= max(0.0, 0.6 - min_sensor) * 0.8 # map isn't black&white
+
+            self.prev_dist = dist
             
         self.score += reward
 
         # If throttle stays near zero → reward shaping issue. If steer saturates ±1 → steering range too large
-        print(f"steer={steer:.2f}, throttle={throttle:.2f}, reward={reward:.2f}")
+        logger.info(f"steer={steer:.2f}, throttle={throttle:.2f}, final_turn={(steer * MAX_STEER):.2f}, final speed={speed:.2f}")
+        logger.info(f"In step: Reward={reward:.2f}, total score={self.score:.2f}")
 
         return next_state, reward, done
 
