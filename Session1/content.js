@@ -3,6 +3,38 @@ let currentVideoId = null;
 let currentVideoTitle = null;
 let transcriptData = null;
 
+// YouTube has shipped multiple transcript panel implementations over time.
+// Keep selectors for the current "view model" markup (transcript-segment-view-model)
+// alongside the older ytd-transcript-segment-renderer markup as a fallback.
+const TRANSCRIPT_SEGMENT_SELECTOR = 'transcript-segment-view-model, ytd-transcript-segment-renderer, [data-segment-start-time]';
+const TRANSCRIPT_TIMESTAMP_SELECTOR = '.ytwTranscriptSegmentViewModelTimestamp, .segment-timestamp';
+const TRANSCRIPT_TEXT_SELECTOR = 'span.ytAttributedStringHost, span[role="text"], .segment-text';
+
+function isElementVisible(el) {
+  if (!el) return false;
+  const rect = el.getBoundingClientRect();
+  return el.offsetParent !== null && rect.width > 0 && rect.height > 0;
+}
+
+// The "Show transcript" button is often present in the DOM but hidden/inert
+// until the video description is expanded ("...more"). Find a visible one,
+// expanding the description first if needed.
+async function findVisibleTranscriptButton() {
+  const selector = 'button[aria-label*="transcript"], button[aria-label*="Transcript"]';
+  let candidates = Array.from(document.querySelectorAll(selector));
+  let visible = candidates.find(isElementVisible);
+  if (visible) return visible;
+
+  const expandBtn = document.querySelector('#description-inline-expander tp-yt-paper-button#expand, tp-yt-paper-button#expand, #expand');
+  if (expandBtn) {
+    expandBtn.click();
+    await new Promise(resolve => setTimeout(resolve, 800));
+  }
+
+  candidates = Array.from(document.querySelectorAll(selector));
+  return candidates.find(isElementVisible) || null;
+}
+
 // Initialize when page loads
 function initialize() {
   // Extract video ID and title
@@ -46,19 +78,43 @@ function initialize() {
   }, 100);
 }
 
+// Poll until the transcript segment count in the DOM stops growing (or give up).
+// Long videos can have thousands of segments, so YouTube can take much longer
+// than a fixed 1-2s delay to render them all, and may render them incrementally.
+function waitForTranscriptSegments(maxWaitMs = 20000, intervalMs = 500, stableChecksNeeded = 2) {
+  const start = Date.now();
+  let lastCount = -1;
+  let stableChecks = 0;
+  const poll = () => {
+    const count = document.querySelectorAll(TRANSCRIPT_SEGMENT_SELECTOR).length;
+    if (count > 0 && count === lastCount) {
+      stableChecks++;
+    } else {
+      stableChecks = 0;
+    }
+    lastCount = count;
+
+    const timedOut = Date.now() - start >= maxWaitMs;
+    if ((count > 0 && stableChecks >= stableChecksNeeded) || timedOut) {
+      if (timedOut) console.log(`Gave up waiting for transcript segments after ${maxWaitMs}ms (found ${count})`);
+      extractTranscriptData();
+      return;
+    }
+    setTimeout(poll, intervalMs);
+  };
+  poll();
+}
+
 // Get transcript data from YouTube
 async function getTranscriptData() {
   try {
     console.log('Attempting to find transcript button...');
-    
-    // Look for transcript button with multiple possible selectors
-    let transcriptButton = document.querySelector('button[aria-label*="transcript"], button[aria-label*="Transcript"], button[aria-label*="Show transcript"], button[aria-label*="Open transcript"]');
-    
-    if (!transcriptButton) {
-      // Try alternative selectors for transcript button
-      transcriptButton = document.querySelector('[aria-label*="transcript"], [aria-label*="Transcript"], [aria-label*="Show transcript"], [aria-label*="Open transcript"]');
-    }
-    
+
+    // The real "Show transcript" button is frequently accompanied by hidden
+    // duplicates (other layouts/panels); only a *visible* one is clickable,
+    // and it's often hidden until the description is expanded.
+    let transcriptButton = await findVisibleTranscriptButton();
+
     if (!transcriptButton) {
       // Try looking for transcript in the more actions menu
       const moreActionsButton = document.querySelector('button[aria-label*="More actions"], button[aria-label*="More"], button[aria-label*="..."]');
@@ -66,33 +122,27 @@ async function getTranscriptData() {
         console.log('Found more actions button, checking for transcript option...');
         moreActionsButton.click();
         setTimeout(() => {
-          const transcriptOption = document.querySelector('[aria-label*="transcript"], [aria-label*="Transcript"]');
+          const transcriptOption = Array.from(document.querySelectorAll('[aria-label*="transcript"], [aria-label*="Transcript"]')).find(isElementVisible);
           if (transcriptOption) {
             console.log('Found transcript option in more actions menu');
             transcriptOption.click();
-            setTimeout(() => {
-              extractTranscriptData();
-            }, 1000);
+            waitForTranscriptSegments();
           }
         }, 500);
         return;
       }
     }
-    
+
     if (transcriptButton) {
       console.log('Found transcript button, clicking...');
       transcriptButton.click();
-      
+
       // Wait for transcript to load and then extract data
-      setTimeout(() => {
-        extractTranscriptData();
-      }, 1500);
+      waitForTranscriptSegments();
     } else {
       console.log('Transcript button not found - trying alternative approach...');
       // Try to find transcript panel that might already be open
-      setTimeout(() => {
-        extractTranscriptData();
-      }, 1000);
+      waitForTranscriptSegments();
     }
   } catch (error) {
     console.log('Could not load transcript:', error);
@@ -105,22 +155,9 @@ function extractTranscriptData() {
     console.log('Extracting transcript data...');
     
     // Look for transcript segments in different possible selectors
-    let transcriptItems = document.querySelectorAll('.ytd-transcript-segment-renderer, [data-segment-start-time], .ytd-transcript-segment-text');
-    
-    if (transcriptItems.length === 0) {
-      // Try alternative selectors for YouTube transcripts
-      transcriptItems = document.querySelectorAll('[data-segment-start-time], .ytd-transcript-segment-text, .ytd-transcript-segment-content');
-    }
-    
-    if (transcriptItems.length === 0) {
-      // Try looking for transcript panel that might already be open
-      const transcriptPanel = document.querySelector('ytd-transcript-renderer, .ytd-transcript-renderer');
-      if (transcriptPanel) {
-        console.log('Found transcript panel, looking for segments...');
-        transcriptItems = transcriptPanel.querySelectorAll('[data-segment-start-time], .ytd-transcript-segment-text, .ytd-transcript-segment-content');
-      }
-    }
-    
+    // Note: these are custom element TAG names / real classes, not guessed CSS classes
+    let transcriptItems = document.querySelectorAll(TRANSCRIPT_SEGMENT_SELECTOR);
+
     if (transcriptItems.length === 0) {
       // Fallback: heuristic scan
       const allElements = document.querySelectorAll('*');
@@ -164,7 +201,7 @@ function extractTranscriptData() {
         // c) Parse displayed timestamp text
         if (seconds == null) {
           let displayTs = '';
-          const tsNode = item.querySelector('.ytd-transcript-segment-timestamp');
+          const tsNode = item.querySelector(TRANSCRIPT_TIMESTAMP_SELECTOR);
           if (tsNode && tsNode.textContent) {
             displayTs = tsNode.textContent.trim();
           } else {
@@ -211,7 +248,7 @@ function extractTranscriptData() {
         
         // Extract clean text (strip timestamp)
         let contentText = '';
-        const textElement = item.querySelector('.ytd-transcript-segment-text, .ytd-transcript-segment-content');
+        const textElement = item.querySelector(TRANSCRIPT_TEXT_SELECTOR);
         if (textElement && textElement.textContent) {
           contentText = textElement.textContent;
         } else {
@@ -654,12 +691,12 @@ function loadSavedTranscript() {
 // Check for existing transcripts on the page
 function checkForExistingTranscripts() {
   console.log('Checking for existing transcripts on the page...');
-  
-  // Look for transcript panel that might already be open
-  const transcriptPanel = document.querySelector('ytd-transcript-renderer, .ytd-transcript-renderer, [data-segment-start-time]');
-  if (transcriptPanel) {
-    console.log('Found existing transcript panel, extracting data...');
-    extractTranscriptData();
+
+  // Look for transcript segments that might already be rendered (panel opened earlier)
+  const existingSegments = document.querySelector(TRANSCRIPT_SEGMENT_SELECTOR);
+  if (existingSegments) {
+    console.log('Found existing transcript segments, extracting data...');
+    waitForTranscriptSegments();
   } else {
     console.log('No existing transcript panel found');
   }
